@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 import structlog
@@ -40,14 +40,14 @@ class MockRunner:
             error_type=labels.get("alertname", "HighErrorRate"),
             error_rate=2.5,
             affected_endpoints=["/api/checkout"],
-            triggered_at=datetime.utcnow(),
+            triggered_at=datetime.now(timezone.utc),
             enrichment={"source": "mock"},
             triage_reason="Mocked alert accepted for Phase 1.",
         )
 
         evidence = Evidence(
             source="logs",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             content="NullReferenceException: payment_method is None",
             relevance="Missing null check in checkout flow",
         )
@@ -74,7 +74,7 @@ class MockRunner:
             summary=f"[AUTO] {thought_signature.root_cause_category.value}: {thought_signature.root_cause}",
             priority="High",
             status="Open",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         settings = get_settings()
@@ -94,6 +94,7 @@ class MockRunner:
             "thought_signature": thought_signature,
             "jira_ticket": jira_ticket,
             "remediation_result": remediation,
+            "ci_status": "ci_passed",
         }
 
 
