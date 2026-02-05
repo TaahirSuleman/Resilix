@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from resilix.models.alert import Severity, ValidatedAlert
 
@@ -12,7 +12,7 @@ def test_validated_alert_schema():
         error_type="HighErrorRate",
         error_rate=5.2,
         affected_endpoints=["/api/checkout"],
-        triggered_at=datetime.utcnow(),
+        triggered_at=datetime.now(UTC),
         enrichment={"foo": "bar"},
         triage_reason="Error rate exceeded",
     )

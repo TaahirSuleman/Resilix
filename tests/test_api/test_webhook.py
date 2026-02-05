@@ -2,20 +2,33 @@ import os
 
 import pytest
 from httpx import AsyncClient, ASGITransport
+from unittest.mock import patch
 
 
 @pytest.fixture
 async def test_client():
-    os.environ["USE_MOCK_MCP"] = "true"
-    os.environ.pop("DATABASE_URL", None)
+    # Clear cached settings and session store first
     import resilix.config.settings as settings_module
+    import resilix.services.session as session_module
     settings_module.get_settings.cache_clear()
+    session_module._session_store = None
+    
+    # Override environment variables for the test
+    env_overrides = {
+        "USE_MOCK_MCP": "true",
+        "DATABASE_URL": "",  # Empty string to disable database
+    }
+    
+    with patch.dict(os.environ, env_overrides, clear=False):
+        # Clear settings again after env override
+        settings_module.get_settings.cache_clear()
+        session_module._session_store = None
+        
+        from resilix.main import create_app
 
-    from resilix.main import create_app
-
-    app = create_app()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        yield client
+        app = create_app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            yield client
 
 
 @pytest.mark.asyncio
