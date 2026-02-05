@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+from types import ModuleType, SimpleNamespace
+
+import pytest
+
+from resilix.services.orchestrator import AdkRunner
+
+
+@dataclass
+class _Session:
+    state: dict
+
+
+class _BaseSessionService:
+    def __init__(self) -> None:
+        self.sessions: dict[tuple[str, str, str], _Session] = {}
+
+    async def create_session(self, *, app_name: str, user_id: str, session_id: str, state: dict):
+        self.sessions[(app_name, user_id, session_id)] = _Session(state=state)
+
+    async def get_session(self, *, app_name: str, user_id: str, session_id: str):
+        return self.sessions.get((app_name, user_id, session_id))
+
+
+class _InMemorySessionService(_BaseSessionService):
+    pass
+
+
+class _DatabaseSessionService(_BaseSessionService):
+    def __init__(self, db_url: str) -> None:
+        super().__init__()
+        self.db_url = db_url
+
+
+class _Runner:
+    def __init__(self, *, app_name: str, agent, session_service):
+        self.app_name = app_name
+        self.agent = agent
+        self.session_service = session_service
+
+    async def run_async(self, *, user_id: str, session_id: str, new_message):
+        session = await self.session_service.get_session(
+            app_name=self.app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        assert session is not None
+        session.state["adk_processed"] = True
+        yield {"event": "done", "message": new_message}
+
+
+class _Part:
+    @staticmethod
+    def from_text(*, text: str):
+        return {"text": text}
+
+
+class _Content:
+    def __init__(self, *, role: str, parts: list[dict]):
+        self.role = role
+        self.parts = parts
+
+
+def _install_fake_adk_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    runners_mod = ModuleType("google.adk.runners")
+    runners_mod.Runner = _Runner
+
+    sessions_mod = ModuleType("google.adk.sessions")
+    sessions_mod.InMemorySessionService = _InMemorySessionService
+
+    db_sessions_mod = ModuleType("google.adk.sessions.database_session_service")
+    db_sessions_mod.DatabaseSessionService = _DatabaseSessionService
+
+    genai_mod = ModuleType("google.genai")
+    genai_mod.types = SimpleNamespace(Content=_Content, Part=_Part)
+
+    monkeypatch.setitem(sys.modules, "google.adk.runners", runners_mod)
+    monkeypatch.setitem(sys.modules, "google.adk.sessions", sessions_mod)
+    monkeypatch.setitem(sys.modules, "google.adk.sessions.database_session_service", db_sessions_mod)
+    monkeypatch.setitem(sys.modules, "google.genai", genai_mod)
+
+
+@pytest.mark.asyncio
+async def test_adk_runner_uses_in_memory_session_when_database_not_set(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_adk_modules(monkeypatch)
+
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    runner = AdkRunner(root_agent=object())
+    result = await runner.run({"status": "firing"}, "INC-ADK-001")
+
+    assert result["incident_id"] == "INC-ADK-001"
+    assert result["raw_alert"]["status"] == "firing"
+    assert result["adk_processed"] is True
+
+
+@pytest.mark.asyncio
+async def test_adk_runner_uses_database_session_service_when_database_set(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_adk_modules(monkeypatch)
+
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/resilix")
+    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    runner = AdkRunner(root_agent=object())
+    result = await runner.run({"status": "firing"}, "INC-ADK-DB-001")
+
+    assert result["incident_id"] == "INC-ADK-DB-001"
+    assert result["adk_processed"] is True
