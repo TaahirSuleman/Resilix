@@ -1,34 +1,6 @@
-import os
+from __future__ import annotations
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-from unittest.mock import patch
-
-
-@pytest.fixture
-async def test_client():
-    # Clear cached settings and session store first
-    import resilix.config.settings as settings_module
-    import resilix.services.session as session_module
-    settings_module.get_settings.cache_clear()
-    session_module._session_store = None
-    
-    # Override environment variables for the test
-    env_overrides = {
-        "USE_MOCK_MCP": "true",
-        "DATABASE_URL": "",  # Empty string to disable database
-    }
-    
-    with patch.dict(os.environ, env_overrides, clear=False):
-        # Clear settings again after env override
-        settings_module.get_settings.cache_clear()
-        session_module._session_store = None
-        
-        from resilix.main import create_app
-
-        app = create_app()
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            yield client
 
 
 @pytest.mark.asyncio
@@ -41,7 +13,11 @@ async def test_webhook_accepts_prometheus_alert(test_client):
         "alerts": [
             {
                 "status": "firing",
-                "labels": {"alertname": "TestAlert", "service": "test-service"},
+                "labels": {
+                    "alertname": "TestAlert",
+                    "service": "test-service",
+                    "severity": "critical",
+                },
                 "annotations": {"summary": "Test alert"},
                 "startsAt": "2026-02-02T10:30:00Z",
             }
@@ -53,3 +29,12 @@ async def test_webhook_accepts_prometheus_alert(test_client):
     data = response.json()
     assert data["status"] == "accepted"
     assert "incident_id" in data
+
+    detail_response = await test_client.get(f"/incidents/{data['incident_id']}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["incident_id"] == data["incident_id"]
+    assert "status" in detail
+    assert "approval_status" in detail
+    assert "pr_status" in detail
+    assert isinstance(detail["timeline"], list)

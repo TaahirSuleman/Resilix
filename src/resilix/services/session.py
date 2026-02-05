@@ -42,6 +42,9 @@ class SessionStore:
     async def get(self, session_id: str) -> Optional[Dict[str, Any]]:  # pragma: no cover
         raise NotImplementedError
 
+    async def list_items(self) -> list[tuple[str, Dict[str, Any]]]:  # pragma: no cover
+        raise NotImplementedError
+
 
 @dataclass
 class MemorySessionStore(SessionStore):
@@ -55,6 +58,9 @@ class MemorySessionStore(SessionStore):
 
     async def get(self, session_id: str) -> Optional[Dict[str, Any]]:
         return self._sessions.get(session_id)
+
+    async def list_items(self) -> list[tuple[str, Dict[str, Any]]]:
+        return list(self._sessions.items())
 
 
 class PostgresSessionStore(SessionStore):
@@ -101,6 +107,14 @@ class PostgresSessionStore(SessionStore):
             if not row:
                 return None
             return row[0]
+
+    async def list_items(self) -> list[tuple[str, Dict[str, Any]]]:
+        from sqlalchemy import select
+
+        async with self._sessionmaker() as session:
+            result = await session.execute(select(self._table.c.session_id, self._table.c.state))
+            rows = result.fetchall()
+            return [(row[0], row[1]) for row in rows]
 
 
 def _normalize_db_url(url: str) -> str:
