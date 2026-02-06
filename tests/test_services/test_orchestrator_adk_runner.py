@@ -6,7 +6,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from resilix.services.orchestrator import AdkRunner
+from resilix.services.orchestrator import AdkRunner, run_orchestrator
 
 
 @dataclass
@@ -33,6 +33,11 @@ class _DatabaseSessionService(_BaseSessionService):
     def __init__(self, db_url: str) -> None:
         super().__init__()
         self.db_url = db_url
+
+
+class _FailingDatabaseSessionService:
+    def __init__(self, db_url: str) -> None:
+        raise ValueError(f"bad database url: {db_url}")
 
 
 class _Runner:
@@ -118,3 +123,64 @@ async def test_adk_runner_uses_database_session_service_when_database_set(monkey
 
     assert result["incident_id"] == "INC-ADK-DB-001"
     assert result["adk_processed"] is True
+
+
+@pytest.mark.asyncio
+async def test_adk_runner_falls_back_to_in_memory_when_database_service_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_fake_adk_modules(monkeypatch)
+
+    import resilix.config.settings as settings_module
+
+    failing_mod = ModuleType("google.adk.sessions.database_session_service")
+    failing_mod.DatabaseSessionService = _FailingDatabaseSessionService
+    monkeypatch.setitem(sys.modules, "google.adk.sessions.database_session_service", failing_mod)
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/resilix")
+    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    runner = AdkRunner(root_agent=object())
+    result = await runner.run({"status": "firing"}, "INC-ADK-DB-FALLBACK-001")
+
+    assert result["incident_id"] == "INC-ADK-DB-FALLBACK-001"
+    assert result["adk_processed"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_falls_back_to_mock_when_adk_run_raises(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "")
+    settings_module.get_settings.cache_clear()
+
+    async def _raise_run(self, raw_alert: dict, incident_id: str):  # type: ignore[no-untyped-def]
+        raise RuntimeError("adk runtime failure")
+
+    monkeypatch.setattr("resilix.services.orchestrator.AdkRunner.run", _raise_run)
+
+    payload = {
+        "status": "firing",
+        "alerts": [
+            {
+                "labels": {
+                    "alertname": "ServiceHealthFlapping",
+                    "service": "edge-router",
+                    "severity": "critical",
+                },
+                "annotations": {"summary": "flapping with backlog"},
+                "startsAt": "2026-02-05T12:38:23Z",
+            }
+        ],
+    }
+    state = await run_orchestrator(payload, "INC-FALLBACK-001", root_agent=object())
+
+    assert "validated_alert" in state
+    assert "thought_signature" in state
+    assert state["ci_status"] in ("pending", "ci_passed")
