@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import structlog
 
@@ -118,9 +119,32 @@ class PostgresSessionStore(SessionStore):
 
 
 def _normalize_db_url(url: str) -> str:
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return url
+    normalized = url
+    if normalized.startswith("postgresql://"):
+        normalized = normalized.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    parts = urlsplit(normalized)
+    if not parts.query:
+        return normalized
+
+    query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    rewritten_pairs: list[tuple[str, str]] = []
+    has_ssl = any(key == "ssl" for key, _ in query_pairs)
+    # libpq/psycopg params that asyncpg does not accept
+    unsupported_for_asyncpg = {"channel_binding", "gssencmode", "target_session_attrs"}
+
+    for key, value in query_pairs:
+        if key in unsupported_for_asyncpg:
+            continue
+        if key == "sslmode":
+            # asyncpg expects `ssl`, while many managed providers publish `sslmode`.
+            if not has_ssl:
+                rewritten_pairs.append(("ssl", value))
+            continue
+        rewritten_pairs.append((key, value))
+
+    rewritten_query = urlencode(rewritten_pairs, doseq=True)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, rewritten_query, parts.fragment))
 
 
 _session_store: Optional[SessionStore] = None

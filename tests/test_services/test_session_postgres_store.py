@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from resilix.services.session import PostgresSessionStore
+from resilix.services.session import PostgresSessionStore, _normalize_db_url
 
 
 @dataclass
@@ -97,3 +97,29 @@ async def test_postgres_list_items_returns_rows(monkeypatch: pytest.MonkeyPatch)
 
     assert result == rows
     assert fake_session.executed_stmt is not None
+
+
+def test_normalize_db_url_rewrites_scheme_and_sslmode_for_asyncpg() -> None:
+    raw = "postgresql://user:pass@db.example.com:5432/resilix?sslmode=require"
+    normalized = _normalize_db_url(raw)
+    assert normalized.startswith("postgresql+asyncpg://")
+    assert "ssl=require" in normalized
+    assert "sslmode=" not in normalized
+
+
+def test_normalize_db_url_keeps_existing_ssl_param() -> None:
+    raw = "postgresql+asyncpg://user:pass@db.example.com:5432/resilix?ssl=true&sslmode=require"
+    normalized = _normalize_db_url(raw)
+    assert "ssl=true" in normalized
+    assert "sslmode=" not in normalized
+
+
+def test_normalize_db_url_strips_unsupported_libpq_params() -> None:
+    raw = (
+        "postgresql://user:pass@db.example.com:5432/resilix"
+        "?sslmode=require&channel_binding=require&gssencmode=disable"
+    )
+    normalized = _normalize_db_url(raw)
+    assert "ssl=require" in normalized
+    assert "channel_binding=" not in normalized
+    assert "gssencmode=" not in normalized
