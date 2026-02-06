@@ -8,12 +8,10 @@ from resilix.tools.jira_tools import jira_create_issue
 
 ADMIN_INSTRUCTION = """You are the Administrator, responsible for governance and audit trails.
 
-Your responsibilities:
-1. CREATE a Jira ticket documenting the incident
-2. SET appropriate priority based on severity
-3. ASSIGN to "Resilix Bot" user
-
-Use the Thought Signature from Sherlock to populate all fields accurately.
+Responsibilities:
+1. Build a complete and accurate ticket from the ThoughtSignature.
+2. Set priority from incident severity.
+3. Preserve a concise evidence summary for reviewability.
 """
 
 

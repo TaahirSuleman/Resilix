@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, HTTPException
 
-from resilix.models.incident import IncidentDetailResponse, IncidentListResponse, PRStatus
+from resilix.models.incident import IncidentDetailResponse, IncidentListResponse
 from resilix.models.timeline import TimelineEventType
+from resilix.services import apply_approval_and_merge, evaluate_approval_request
 from resilix.services.incident_mapper import append_timeline_event, state_to_incident_detail, state_to_incident_summary
 from resilix.services.session import get_session_store
 
@@ -37,49 +36,11 @@ async def approve_merge(incident_id: str) -> IncidentDetailResponse:
     state = await store.get(incident_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Incident not found")
+    decision = evaluate_approval_request(state)
+    if not decision.eligible:
+        raise HTTPException(status_code=409, detail={"code": decision.code, "message": decision.message})
 
-    detail = state_to_incident_detail(incident_id, state)
-    remediation = state.get("remediation_result")
-    has_pr = False
-    if isinstance(remediation, dict):
-        has_pr = bool(remediation.get("pr_number") or remediation.get("pr_url"))
-    elif remediation is not None:
-        has_pr = bool(getattr(remediation, "pr_number", None) or getattr(remediation, "pr_url", None))
-
-    if not has_pr:
-        raise HTTPException(status_code=409, detail={"code": "pr_not_created", "message": "PR not created"})
-
-    if detail.pr_status == PRStatus.MERGED:
-        raise HTTPException(status_code=409, detail={"code": "already_merged", "message": "PR already merged"})
-
-    if detail.pr_status != PRStatus.CI_PASSED:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "ci_not_passed", "message": "Merge approval requires CI passed"},
-        )
-
-    approval = state.setdefault("approval", {})
-    if not approval.get("required", False):
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "approval_not_required", "message": "Approval is not required for this incident"},
-        )
-    approval["required"] = True
-    approval["approved"] = True
-    approval["approved_at"] = datetime.now(timezone.utc).isoformat()
-
-    if isinstance(remediation, dict):
-        remediation["pr_merged"] = True
-    else:
-        state["remediation_result"] = {
-            "success": True,
-            "action_taken": "fix_code",
-            "pr_merged": True,
-            "execution_time_seconds": 0.0,
-        }
-
-    state["ci_status"] = "ci_passed"
-    state["resolved_at"] = datetime.now(timezone.utc).isoformat()
+    apply_approval_and_merge(state)
     append_timeline_event(state, TimelineEventType.PR_MERGED, agent="Mechanic")
     append_timeline_event(state, TimelineEventType.INCIDENT_RESOLVED, agent="System")
 
