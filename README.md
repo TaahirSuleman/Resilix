@@ -77,6 +77,28 @@ uvicorn resilix.main:app --reload
 
 Send a Prometheus-style alert to `POST /webhook/prometheus`.
 
+## Frontend (Vite + Tailwind)
+
+Dev (API + UI):
+```bash
+# Terminal 1: backend
+uvicorn resilix.main:app --reload --port 8080
+
+# Terminal 2: frontend
+cd frontend
+npm install
+npm run dev
+```
+
+Production build served by FastAPI:
+```bash
+cd frontend
+npm install
+npm run build
+
+uvicorn resilix.main:app --reload --port 8080
+```
+
 ## Run via ADK Runner (Direct)
 
 1. Set:
