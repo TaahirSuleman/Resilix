@@ -1,0 +1,44 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:$COMMIT_SHA', '.']
+
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:$COMMIT_SHA']
+
+  # (Optional) Tag with 'latest' and push
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['tag', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:$COMMIT_SHA', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:latest']
+  
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:latest']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      [
+        'run',
+        'deploy',
+        '$_SERVICE_NAME',
+        '--image',
+        '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:latest',
+        '--region',
+        '$_REGION',
+        '--platform',
+        'managed',
+        '--allow-unauthenticated',
+      ]
+
+substitutions:
+  _REGION: 'us-east1'
+  _REPOSITORY: 'resilix-containers'
+  _SERVICE_NAME: 'resilix-service'
+
+images:
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:$COMMIT_SHA'
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
