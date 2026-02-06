@@ -48,7 +48,7 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
     )
     await store.save(incident_id, initial_state)
 
-    state = await run_orchestrator(payload, incident_id, get_root_agent())
+    state = await run_orchestrator(payload, incident_id, get_root_agent)
     merged_state = {**initial_state, **state}
     merged_state.setdefault("approval", initial_state["approval"])
     merged_state.setdefault("ci_status", initial_state["ci_status"])

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from zlib import crc32
 
 import structlog
@@ -15,6 +15,14 @@ from resilix.services.sentinel_service import evaluate_alert
 from resilix.tools.log_tools import query_logs
 
 logger = structlog.get_logger(__name__)
+
+_PLACEHOLDER_API_KEYS = {
+    "your_key",
+    "your_api_key",
+    "changeme",
+    "replace_me",
+    "replace-with-real-key",
+}
 
 
 def _parse_dt(value: Any) -> datetime:
@@ -310,11 +318,20 @@ class AdkRunner:
 
 async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_agent: Any) -> Dict[str, Any]:
     settings = get_settings()
-    if settings.use_mock_mcp or not settings.gemini_api_key:
-        logger.info("Using mock runner", use_mock_mcp=settings.use_mock_mcp)
+    api_key = (settings.gemini_api_key or "").strip()
+    usable_api_key = bool(api_key) and api_key.lower() not in _PLACEHOLDER_API_KEYS
+
+    if settings.use_mock_mcp or not usable_api_key:
+        logger.info(
+            "Using mock runner",
+            use_mock_mcp=settings.use_mock_mcp,
+            has_usable_api_key=usable_api_key,
+        )
         return await MockRunner().run(raw_alert, incident_id)
+
+    agent_instance = root_agent() if callable(root_agent) else root_agent
     try:
-        return await AdkRunner(root_agent).run(raw_alert, incident_id)
+        return await AdkRunner(agent_instance).run(raw_alert, incident_id)
     except Exception as exc:
         logger.warning(
             "ADK runner failed; falling back to mock runner for this incident",

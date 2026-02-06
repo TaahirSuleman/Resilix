@@ -28,6 +28,12 @@ def test_validate_env_requires_api_key() -> None:
         run_adk._validate_env(settings)
 
 
+def test_validate_env_rejects_placeholder_api_key() -> None:
+    settings = SimpleNamespace(use_mock_mcp=False, gemini_api_key="your_key")
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        run_adk._validate_env(settings)
+
+
 def test_load_payload_from_json_arg() -> None:
     args = SimpleNamespace(alert_json='{"status":"firing"}', alert_file=None)
     payload = run_adk._load_payload(args)

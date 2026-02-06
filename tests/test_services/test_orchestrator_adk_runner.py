@@ -184,3 +184,31 @@ async def test_run_orchestrator_falls_back_to_mock_when_adk_run_raises(
     assert "validated_alert" in state
     assert "thought_signature" in state
     assert state["ci_status"] in ("pending", "ci_passed")
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_uses_mock_for_placeholder_api_key_without_creating_agent(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "your_key")
+    monkeypatch.setenv("DATABASE_URL", "")
+    settings_module.get_settings.cache_clear()
+
+    def _raise_if_called():
+        raise AssertionError("root agent factory should not be called in mock fallback path")
+
+    payload = {
+        "status": "firing",
+        "alerts": [
+            {
+                "labels": {"alertname": "ServiceHealthFlapping", "service": "edge-router"},
+                "annotations": {"summary": "flapping with backlog"},
+                "startsAt": "2026-02-05T12:38:23Z",
+            }
+        ],
+    }
+    state = await run_orchestrator(payload, "INC-PLACEHOLDER-001", root_agent=_raise_if_called)
+    assert "validated_alert" in state
