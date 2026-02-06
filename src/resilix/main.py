@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from resilix.api import health_router, incidents_router, webhooks_router
 from resilix.config import get_settings
@@ -33,6 +35,10 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(webhooks_router)
     app.include_router(incidents_router)
+
+    dist_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if dist_dir.exists():
+        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 
     return app
 
