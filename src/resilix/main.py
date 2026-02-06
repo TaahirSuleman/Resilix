@@ -8,13 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from resilix.api import health_router, incidents_router, webhooks_router
 from resilix.config import get_settings
 from resilix.config.logging import configure_logging
-from resilix.services.session import get_session_store
+from resilix.services.session import ensure_session_store_initialized
 
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
-    store = get_session_store()
-    await store.init()
+    await ensure_session_store_initialized()
     yield
 
 

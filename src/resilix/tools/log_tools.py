@@ -20,14 +20,38 @@ def query_logs(
 
     Returns mocked log entries for Phase 1.
     """
-    entries = [
+    fixture_entries = [
         {
-            "timestamp": "2026-02-04T10:30:00Z",
+            "timestamp": "2026-02-05T10:30:00Z",
+            "level": "ERROR",
+            "event": "TargetHealthFlapping",
+            "message": "Targets alternating between healthy and unhealthy due to propagation backlog",
+            "service": service_name,
+            "metadata": {"queue_depth": 230061, "unhealthy_targets_count": 480},
+        },
+        {
+            "timestamp": "2026-02-05T10:31:00Z",
+            "level": "ERROR",
+            "event": "TargetHealthFlapping",
+            "message": "Propagation backlog is growing and health state is unstable",
+            "service": service_name,
+            "metadata": {"queue_depth": 330234, "unhealthy_targets_count": 583},
+        },
+        {
+            "timestamp": "2026-02-05T10:32:00Z",
             "level": log_level,
-            "message": "NullReferenceException: payment_method is None",
+            "event": "DependencyTimeout",
+            "message": "Upstream dependency timed out while processing request",
             "service": service_name,
         }
     ]
+    if search_pattern:
+        pattern = search_pattern.lower()
+        entries = [
+            entry for entry in fixture_entries if pattern in str(entry.get("message", "")).lower()
+        ]
+    else:
+        entries = fixture_entries
     return {
         "service": service_name,
         "log_count": len(entries),

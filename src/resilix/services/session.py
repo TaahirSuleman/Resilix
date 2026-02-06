@@ -139,3 +139,22 @@ def get_session_store() -> SessionStore:
         logger.warning("DATABASE_URL not set; using in-memory session store")
         _session_store = MemorySessionStore()
     return _session_store
+
+
+async def ensure_session_store_initialized() -> SessionStore:
+    """Initialize session store and gracefully fall back if DB is unavailable."""
+    global _session_store
+    store = get_session_store()
+    try:
+        await store.init()
+        return store
+    except Exception as exc:
+        if isinstance(store, PostgresSessionStore):
+            logger.warning(
+                "Postgres session store init failed; falling back to in-memory store",
+                error=str(exc),
+            )
+            _session_store = MemorySessionStore()
+            await _session_store.init()
+            return _session_store
+        raise

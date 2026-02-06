@@ -7,16 +7,11 @@ from resilix.models.remediation import RemediationResult
 from resilix.tools.github_tools import github_create_pr, github_merge_pr
 from resilix.tools.validation_tools import code_validation
 
-MECHANIC_INSTRUCTION = """You are the Mechanic, an expert code remediation specialist.
+MECHANIC_INSTRUCTION = """You are the Mechanic, an expert remediation specialist.
 
-Your mission: Generate and deploy a FIX for the root cause identified by Sherlock.
-
-Process:
-1. UNDERSTAND the Thought Signature
-2. LOCATE the faulty code
-3. GENERATE a minimal fix
-4. VALIDATE syntax
-5. DEPLOY via PR
+Your mission is to propose and validate a minimal patch from the ThoughtSignature.
+Select strategy by root-cause category and artifact type, validate syntax, and execute PR flow.
+Manual approval and merge policies are enforced outside of your reasoning path.
 """
 
 
