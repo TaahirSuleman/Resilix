@@ -14,9 +14,11 @@ export function App() {
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [usingMock, setUsingMock] = useState(false)
+  const [useMock, setUseMock] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isApproving, setIsApproving] = useState(false)
+
+  const usingMock = useMock || Boolean(error)
 
   const activeIncidentCount = useMemo(() => {
     return incidents.filter((incident) => incident.status !== 'resolved' && incident.status !== 'failed').length
@@ -26,12 +28,20 @@ export function App() {
     let active = true
 
     const loadIncidents = async () => {
+      if (useMock) {
+        setIncidents(MOCK_INCIDENTS)
+        setIsLoading(false)
+        if (!selectedIncidentId) {
+          setSelectedIncidentId(MOCK_INCIDENTS[0]?.id ?? null)
+        }
+        return
+      }
+
       try {
         const data = await listIncidents()
         if (!active) return
         const mapped = data.items.map(mapIncidentSummary)
         setIncidents(mapped)
-        setUsingMock(false)
         setError(null)
         setIsLoading(false)
 
@@ -45,7 +55,6 @@ export function App() {
       } catch (err) {
         if (!active) return
         setIncidents(MOCK_INCIDENTS)
-        setUsingMock(true)
         setError('API unreachable. Showing mock data.')
         setIsLoading(false)
         if (!selectedIncidentId) {
@@ -61,7 +70,7 @@ export function App() {
       active = false
       window.clearInterval(interval)
     }
-  }, [selectedIncidentId])
+  }, [selectedIncidentId, useMock])
 
   useEffect(() => {
     if (!selectedIncidentId) {
@@ -91,7 +100,6 @@ export function App() {
       } catch (err) {
         if (!active) return
         setError('Unable to load incident detail. Using mock data.')
-        setUsingMock(true)
         const mock = MOCK_INCIDENTS.find((incident) => incident.id === selectedIncidentId) ?? MOCK_INCIDENTS[0]
         setSelectedIncident(mock)
       }
@@ -121,14 +129,31 @@ export function App() {
     }
   }
 
+  const handleUseMock = () => {
+    setUseMock(true)
+    setError('Showing demo data.')
+    setIncidents(MOCK_INCIDENTS)
+    setSelectedIncidentId(MOCK_INCIDENTS[0]?.id ?? null)
+  }
+
+  const handleUseLive = () => {
+    setUseMock(false)
+    setError(null)
+  }
+
   return (
     <div className="h-screen w-full bg-gray-50 flex flex-col overflow-hidden font-sans text-gray-900">
       <SystemHealthStrip activeIncidents={activeIncidentCount} />
 
       <div className="flex-1 flex mt-12 overflow-hidden">
         {error ? (
-          <div className="absolute top-16 right-6 z-20 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 shadow-sm">
-            {error}
+          <div className="absolute top-16 right-6 z-20 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 shadow-sm flex items-center gap-3">
+            <span>{error}</span>
+            {useMock ? (
+              <button className="text-xs font-semibold text-amber-900" onClick={handleUseLive}>
+                Return to live
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -137,6 +162,7 @@ export function App() {
           selectedId={selectedIncidentId ?? ''}
           onSelect={setSelectedIncidentId}
           isLoading={isLoading}
+          onUseMock={handleUseMock}
         />
 
         <main className="flex-1 relative bg-white shadow-sm z-0">
