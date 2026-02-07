@@ -3,8 +3,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from resilix.api import health_router, incidents_router, webhooks_router
@@ -36,11 +37,24 @@ def create_app() -> FastAPI:
     app.include_router(webhooks_router)
     app.include_router(incidents_router)
 
-    dist_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if settings.frontend_dist_dir:
+        dist_dir = Path(settings.frontend_dist_dir)
+    else:
+        dist_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if not dist_dir.exists():
         dist_dir = Path("/app/frontend/dist")
 
     if dist_dir.exists():
+        @app.middleware("http")
+        async def _cache_control_middleware(request: Request, call_next):
+            response: Response = await call_next(request)
+            path = request.url.path
+            if path.startswith("/assets/"):
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            elif request.method == "GET" and "text/html" in response.headers.get("content-type", ""):
+                response.headers["Cache-Control"] = "no-cache"
+            return response
+
         app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 
     return app
