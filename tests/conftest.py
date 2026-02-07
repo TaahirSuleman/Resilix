@@ -17,7 +17,7 @@ async def test_client() -> AsyncIterator[AsyncClient]:
     session_module._session_store = None
 
     env_overrides = {
-        "USE_MOCK_MCP": "true",
+        "USE_MOCK_PROVIDERS": "true",
         "DATABASE_URL": "",
         "REQUIRE_PR_APPROVAL": "true",
         "JIRA_INTEGRATION_MODE": "mock",

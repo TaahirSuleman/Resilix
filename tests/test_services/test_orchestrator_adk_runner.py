@@ -95,7 +95,7 @@ async def test_adk_runner_uses_in_memory_session_when_database_not_set(monkeypat
     import resilix.config.settings as settings_module
 
     monkeypatch.setenv("DATABASE_URL", "")
-    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     settings_module.get_settings.cache_clear()
 
@@ -114,7 +114,7 @@ async def test_adk_runner_uses_database_session_service_when_database_set(monkey
     import resilix.config.settings as settings_module
 
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/resilix")
-    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     settings_module.get_settings.cache_clear()
 
@@ -138,7 +138,7 @@ async def test_adk_runner_falls_back_to_in_memory_when_database_service_fails(
     monkeypatch.setitem(sys.modules, "google.adk.sessions.database_session_service", failing_mod)
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/resilix")
-    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     settings_module.get_settings.cache_clear()
 
@@ -155,7 +155,7 @@ async def test_run_orchestrator_falls_back_to_mock_when_adk_run_raises(
 ):
     import resilix.config.settings as settings_module
 
-    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
@@ -194,7 +194,7 @@ async def test_run_orchestrator_uses_mock_for_placeholder_api_key_without_creati
 ):
     import resilix.config.settings as settings_module
 
-    monkeypatch.setenv("USE_MOCK_MCP", "false")
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "your_key")
     monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
@@ -215,4 +215,30 @@ async def test_run_orchestrator_uses_mock_for_placeholder_api_key_without_creati
         ],
     }
     state = await run_orchestrator(payload, "INC-PLACEHOLDER-001", root_agent=_raise_if_called)
+    assert "validated_alert" in state
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_supports_legacy_use_mock_mcp_flag(monkeypatch: pytest.MonkeyPatch):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.delenv("USE_MOCK_PROVIDERS", raising=False)
+    monkeypatch.setenv("USE_MOCK_MCP", "true")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "mock")
+    settings_module.get_settings.cache_clear()
+
+    payload = {
+        "status": "firing",
+        "alerts": [
+            {
+                "labels": {"alertname": "ServiceHealthFlapping", "service": "edge-router"},
+                "annotations": {"summary": "legacy mock flag compatibility"},
+                "startsAt": "2026-02-05T12:38:23Z",
+            }
+        ],
+    }
+    state = await run_orchestrator(payload, "INC-LEGACY-MOCK-FLAG-001", root_agent=object())
     assert "validated_alert" in state

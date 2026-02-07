@@ -17,19 +17,28 @@ class _FakeRunner:
 
 
 def test_validate_env_rejects_mock_mode() -> None:
-    settings = SimpleNamespace(use_mock_mcp=True, gemini_api_key="abc")
-    with pytest.raises(RuntimeError, match="USE_MOCK_MCP"):
+    settings = SimpleNamespace(
+        gemini_api_key="abc",
+        effective_use_mock_providers=lambda: True,
+    )
+    with pytest.raises(RuntimeError, match="USE_MOCK_PROVIDERS"):
         run_adk._validate_env(settings)
 
 
 def test_validate_env_requires_api_key() -> None:
-    settings = SimpleNamespace(use_mock_mcp=False, gemini_api_key=None)
+    settings = SimpleNamespace(
+        gemini_api_key=None,
+        effective_use_mock_providers=lambda: False,
+    )
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
         run_adk._validate_env(settings)
 
 
 def test_validate_env_rejects_placeholder_api_key() -> None:
-    settings = SimpleNamespace(use_mock_mcp=False, gemini_api_key="your_key")
+    settings = SimpleNamespace(
+        gemini_api_key="your_key",
+        effective_use_mock_providers=lambda: False,
+    )
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
         run_adk._validate_env(settings)
 
@@ -48,7 +57,10 @@ def test_main_runs_and_prints_result(monkeypatch: pytest.MonkeyPatch, capsys: py
     monkeypatch.setattr(
         run_adk,
         "get_settings",
-        lambda: SimpleNamespace(use_mock_mcp=False, gemini_api_key="test-key"),
+        lambda: SimpleNamespace(
+            gemini_api_key="test-key",
+            effective_use_mock_providers=lambda: False,
+        ),
     )
 
     args = ["run_adk", "--alert-json", json.dumps(payload), "--incident-id", "INC-CLI-001"]
