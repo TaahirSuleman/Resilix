@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+import structlog
 
 from resilix.models.incident import IncidentDetailResponse, IncidentListResponse
 from resilix.models.timeline import TimelineEventType
 from resilix.config import get_settings
-from resilix.services import apply_approval_and_merge, evaluate_approval_request, get_code_provider
+from resilix.services import apply_approval_and_merge, evaluate_approval_request, get_code_provider, get_ticket_provider
 from resilix.services.incident_mapper import append_timeline_event, state_to_incident_detail, state_to_incident_summary
 from resilix.services.session import get_session_store
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 @router.get("/incidents", response_model=IncidentListResponse)
@@ -71,6 +73,44 @@ async def approve_merge(incident_id: str) -> IncidentDetailResponse:
 
     apply_approval_and_merge(state)
     append_timeline_event(state, TimelineEventType.PR_MERGED, agent="Mechanic")
+    ticket = state.get("jira_ticket")
+    ticket_key = None
+    if isinstance(ticket, dict):
+        ticket_key = ticket.get("ticket_key")
+    elif ticket is not None:
+        ticket_key = getattr(ticket, "ticket_key", None)
+    if ticket_key:
+        ticket_provider, _ = get_ticket_provider()
+        transition_result = await ticket_provider.transition_ticket(
+            ticket_key=str(ticket_key),
+            target_status=settings.jira_status_done,
+        )
+        trace = state.setdefault("integration_trace", {})
+        transitions = trace.setdefault("jira_transitions", [])
+        transitions.append(transition_result)
+        if bool(transition_result.get("ok")):
+            append_timeline_event(
+                state,
+                TimelineEventType.TICKET_MOVED_DONE,
+                agent="Administrator",
+                details={"to_status": settings.jira_status_done, "ticket_key": str(ticket_key)},
+            )
+        else:
+            append_timeline_event(
+                state,
+                TimelineEventType.TICKET_TRANSITION_FAILED,
+                agent="Administrator",
+                details={
+                    "to_status": settings.jira_status_done,
+                    "ticket_key": str(ticket_key),
+                    "reason": transition_result.get("reason"),
+                },
+            )
+            logger.warning(
+                "Jira ticket transition failed during approve-merge",
+                ticket_key=str(ticket_key),
+                reason=transition_result.get("reason"),
+            )
     append_timeline_event(state, TimelineEventType.INCIDENT_RESOLVED, agent="System")
 
     await store.save(incident_id, state)

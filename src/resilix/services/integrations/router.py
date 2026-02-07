@@ -34,6 +34,8 @@ def get_ticket_provider() -> tuple[TicketProvider, str]:
             api_token=settings.jira_api_token or "",
             project_key=settings.jira_project_key,
             issue_type=settings.jira_issue_type,
+            transition_strict=settings.jira_transition_strict,
+            transition_aliases=settings.jira_transition_aliases,
         )
         return provider, "jira_api"
     return MockTicketProvider(), "jira_mock"

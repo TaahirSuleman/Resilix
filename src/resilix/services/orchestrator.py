@@ -9,8 +9,11 @@ import structlog
 from resilix.config import get_settings
 from resilix.models.remediation import RecommendedAction, RemediationResult
 from resilix.models.thought_signature import Evidence, RootCauseCategory, ThoughtSignature
+from resilix.models.timeline import TimelineEventType
 from resilix.services.admin_service import build_ticket_from_signature
+from resilix.services.incident_mapper import append_timeline_event
 from resilix.services.integrations import get_code_provider, get_ticket_provider
+from resilix.services.integrations.mock_providers import MockCodeProvider, MockTicketProvider
 from resilix.services.pr_merge_policy import evaluate_merge_eligibility
 from resilix.services.sentinel_service import evaluate_alert
 from resilix.tools.log_tools import query_logs
@@ -100,6 +103,47 @@ def _build_evidence_chain(raw_alert: Dict[str, Any], service_name: str) -> list[
             )
         )
     return evidence_chain
+
+
+async def _transition_jira_ticket(
+    *,
+    state: dict[str, Any],
+    ticket_provider: Any,
+    jira_ticket: Any,
+    target_status: str,
+    event_type: TimelineEventType,
+) -> None:
+    ticket_key = getattr(jira_ticket, "ticket_key", None)
+    if not ticket_key:
+        logger.warning("Skipping Jira transition: missing ticket key", target_status=target_status)
+        return
+
+    trace = state.setdefault("integration_trace", {})
+    transitions = trace.setdefault("jira_transitions", [])
+    result = await ticket_provider.transition_ticket(ticket_key=ticket_key, target_status=target_status)
+    transitions.append(result)
+
+    if bool(result.get("ok")):
+        append_timeline_event(
+            state,
+            event_type,
+            agent="Administrator",
+            details={"to_status": target_status, "ticket_key": ticket_key},
+        )
+        return
+
+    append_timeline_event(
+        state,
+        TimelineEventType.TICKET_TRANSITION_FAILED,
+        agent="Administrator",
+        details={"to_status": target_status, "reason": result.get("reason"), "ticket_key": ticket_key},
+    )
+    logger.warning(
+        "Jira ticket transition failed",
+        ticket_key=ticket_key,
+        target_status=target_status,
+        reason=result.get("reason"),
+    )
 
 
 class MockRunner:
@@ -217,15 +261,19 @@ class MockRunner:
             severity=validated.severity,
             service_name=validated.service_name,
         )
-        ticket_provider, ticket_provider_name = get_ticket_provider()
+        if settings.use_mock_mcp:
+            ticket_provider, ticket_provider_name = MockTicketProvider(), "jira_mock"
+            code_provider, code_provider_name = MockCodeProvider(), "github_mock"
+        else:
+            ticket_provider, ticket_provider_name = get_ticket_provider()
+            code_provider, code_provider_name = get_code_provider()
+
         jira_ticket = await ticket_provider.create_incident_ticket(
             incident_id=incident_id,
             summary=normalized_ticket.summary,
             description=thought_signature.investigation_summary,
             priority=normalized_ticket.priority,
         )
-
-        code_provider, code_provider_name = get_code_provider()
         remediation = await code_provider.create_remediation_pr(
             incident_id=incident_id,
             repository=thought_signature.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
@@ -248,6 +296,20 @@ class MockRunner:
             "code_provider": code_provider_name,
             "fallback_used": ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock"),
         }
+        await _transition_jira_ticket(
+            state=state,
+            ticket_provider=ticket_provider,
+            jira_ticket=jira_ticket,
+            target_status=settings.jira_status_todo,
+            event_type=TimelineEventType.TICKET_MOVED_TODO,
+        )
+        await _transition_jira_ticket(
+            state=state,
+            ticket_provider=ticket_provider,
+            jira_ticket=jira_ticket,
+            target_status=settings.jira_status_in_progress,
+            event_type=TimelineEventType.TICKET_MOVED_IN_PROGRESS,
+        )
         if gate_status is not None:
             state["ci_status"] = "ci_passed" if gate_status.ci_passed else "pending"
             state["codeowner_review_status"] = "approved" if gate_status.codeowner_reviewed else "pending"
@@ -255,6 +317,13 @@ class MockRunner:
         else:
             state["ci_status"] = "ci_passed"
             state["codeowner_review_status"] = "pending"
+        await _transition_jira_ticket(
+            state=state,
+            ticket_provider=ticket_provider,
+            jira_ticket=jira_ticket,
+            target_status=settings.jira_status_in_review,
+            event_type=TimelineEventType.TICKET_MOVED_IN_REVIEW,
+        )
         state["agent_trace"]["sherlock"] = {
             "thinking_level": settings.sherlock_thinking_level,
             "include_thoughts": settings.include_thoughts,

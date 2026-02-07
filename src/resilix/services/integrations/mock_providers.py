@@ -27,6 +27,20 @@ class MockTicketProvider:
             created_at=datetime.now(timezone.utc),
         )
 
+    async def transition_ticket(
+        self,
+        *,
+        ticket_key: str,
+        target_status: str,
+    ) -> dict[str, object]:
+        return {
+            "ok": True,
+            "from_status": None,
+            "to_status": target_status,
+            "applied_transition_id": "mock-transition",
+            "reason": None,
+        }
+
 
 class MockCodeProvider:
     async def create_remediation_pr(

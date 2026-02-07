@@ -57,9 +57,11 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
 
     state = await run_orchestrator(payload, incident_id, get_root_agent)
     merged_state = {**initial_state, **state}
+    initial_timeline = list(initial_state.get("timeline", []))
+    state_timeline = list(state.get("timeline", [])) if isinstance(state.get("timeline"), list) else []
+    merged_state["timeline"] = initial_timeline + state_timeline
     merged_state.setdefault("approval", initial_state["approval"])
     merged_state.setdefault("ci_status", initial_state["ci_status"])
-    merged_state.setdefault("timeline", initial_state["timeline"])
 
     if merged_state.get("validated_alert"):
         append_timeline_event(merged_state, TimelineEventType.ALERT_VALIDATED, agent="Sentinel")

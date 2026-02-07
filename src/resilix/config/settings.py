@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     jira_api_token: Optional[str] = None
     jira_project_key: str = "PLACEHOLDER_JIRA_PROJECT_KEY"
     jira_issue_type: str = "Bug"
+    jira_status_todo: str = "To Do"
+    jira_status_in_progress: str = "In Progress"
+    jira_status_in_review: str = "In Review"
+    jira_status_done: str = "Done"
+    jira_transition_strict: bool = False
+    jira_transition_aliases: str = ""
 
     # Logging
     log_level: str = "INFO"

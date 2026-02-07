@@ -23,6 +23,13 @@ class TicketProvider(Protocol):
         priority: str,
     ) -> JiraTicketResult: ...
 
+    async def transition_ticket(
+        self,
+        *,
+        ticket_key: str,
+        target_status: str,
+    ) -> dict[str, object]: ...
+
 
 class CodeProvider(Protocol):
     async def create_remediation_pr(
