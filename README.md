@@ -67,6 +67,17 @@ Environment:
 | `USE_MOCK_MCP` | Optional | `true` for mock pipeline |
 | `DATABASE_URL` | Optional | Enables Postgres-backed sessions |
 | `REQUIRE_PR_APPROVAL` | Optional | `true` keeps PR merges gated |
+| `REQUIRE_CI_PASS` | Optional | `true` requires CI before merge |
+| `REQUIRE_CODEOWNER_REVIEW` | Optional | `true` requires codeowner review before merge |
+| `MERGE_METHOD` | Optional | Defaults to `squash` |
+| `GITHUB_TOKEN` | Optional | Required for direct GitHub integration |
+| `GITHUB_OWNER` | Optional | Org/user owner for demo repos |
+| `GITHUB_DEFAULT_BASE_BRANCH` | Optional | Defaults to `main` |
+| `JIRA_URL` | Optional | Required for direct Jira integration |
+| `JIRA_USERNAME` | Optional | Jira username/email |
+| `JIRA_API_TOKEN` | Optional | Jira API token |
+| `JIRA_PROJECT_KEY` | Optional | Jira project key |
+| `JIRA_ISSUE_TYPE` | Optional | Defaults to `Bug` |
 | `LOG_LEVEL` | Optional | Defaults to `INFO` |
 
 ## Run via Webhook (FastAPI)
