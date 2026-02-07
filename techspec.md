@@ -2605,20 +2605,126 @@ data:
 
 ### Phase 5: Integration & Polish
 
-**Goal**: End-to-end demo ready for hackathon submission
+**Goal**: Production-like, repeatable demo simulation with API-first integrations and clean handoff into dedicated demo repositories.
 
-**Tasks**:
-- [ ] Test full flow: failure → detection → RCA → Jira → PR → approval → merge → recovery
-- [ ] Verify dashboard updates in real-time
-- [ ] Verify MTTR calculation is accurate
-- [ ] Test CI/CD pipeline (Cloud Build)
-- [ ] Record 3-minute demo video
-- [ ] Write submission description (~200 words)
-- [ ] Create README with setup instructions
-- [ ] Final bug fixes and edge case handling
-- [ ] Deploy production versions to Cloud Run
+**Status Note (Current Architecture)**:
+- Runtime integrations are API-first (Jira/GitHub direct APIs), not MCP runtime servers.
+- `USE_MOCK_PROVIDERS` is canonical; `USE_MOCK_MCP` is legacy compatibility only.
+- Backend and frontend are independently deployable Cloud Run services.
 
-**Deliverable**: Submitted to Devpost before Feb 9, 2026 deadline
+**Phase 5 Objective**:
+- Make the demo deterministic, replayable, and judge-friendly by shipping a simulator toolchain and demo repos that can consistently produce:
+  - realistic incident trigger patterns,
+  - observable lifecycle transitions in UI,
+  - real Jira board movement and GitHub PR lifecycle.
+
+#### 5.1 Deliverables (Must Ship)
+- [ ] `resilix-demo-app` repository (primary PR target for code/config remediation).
+- [ ] `resilix-demo-config` repository (secondary PR target for infra/config scenario).
+- [ ] `simulator/` package in current repo with replayable alert/log generators.
+- [ ] End-to-end runbook: local and deployed smoke scripts.
+- [ ] Cloud Build/Run env + secrets documented and validated for backend + frontend.
+- [ ] 3-minute recording script and final capture checklist.
+
+#### 5.2 Repository/Package Strategy (Implement Here First, Then Split)
+**Recommended execution order**:
+1. Build and validate all simulator code inside this existing repo first.
+2. Stabilize contracts and replay scripts against deployed backend/frontend.
+3. Extract to dedicated demo repositories once behavior is stable.
+
+**Repository map**:
+1. `resilix` (current)
+- Backend service, frontend dashboard, shared models/contracts, simulator package (initially).
+2. `resilix-demo-app`
+- Minimal service/app artifacts that Resilix modifies through PRs.
+- Include intentional reversible misconfig states and golden fixed states.
+3. `resilix-demo-config`
+- Infra-oriented config targets for non-code remediation path.
+4. (Optional) `resilix-demo-runbooks`
+- Presentation scripts, sample payloads, one-command demo orchestration docs.
+
+**Simulator package shape (inside current repo first)**:
+- `simulator/fixtures/`:
+  - canonical alert payloads (critical/high), flapping/backlog variants.
+- `simulator/generators/`:
+  - deterministic timeline/log emitters (seeded for repeatability).
+- `simulator/scenarios/`:
+  - scenario registry (baseline, flapping, dependency timeout).
+- `simulator/scripts/`:
+  - `trigger_alert.py`, `run_scenario.py`, `verify_lifecycle.py`.
+
+#### 5.3 API and UX Validation Contract (Phase 5 Gates)
+- [ ] `POST /webhook/prometheus` accepts seeded simulated alerts and returns `incident_id`.
+- [ ] `GET /incidents` and `GET /incidents/{id}` reflect lifecycle progression.
+- [ ] `POST /incidents/{id}/approve-merge` transitions incident to resolved path.
+- [ ] Jira issue transitions visible on board:
+  - To Do -> In Progress -> In Review -> Done.
+- [ ] GitHub PR lifecycle visible:
+  - branch -> commit -> PR -> CI pass -> approval -> squash merge.
+- [ ] Frontend reflects timeline + evidence + remediation + approval gate state.
+
+#### 5.4 Required Secrets/Env for Deployed E2E Demo
+- [ ] `GEMINI_API_KEY`
+- [ ] `DATABASE_URL`
+- [ ] `USE_MOCK_PROVIDERS=false`
+- [ ] `GITHUB_TOKEN`
+- [ ] `GITHUB_OWNER`
+- [ ] `GITHUB_DEFAULT_BASE_BRANCH`
+- [ ] `JIRA_URL`
+- [ ] `JIRA_USERNAME`
+- [ ] `JIRA_API_TOKEN`
+- [ ] `JIRA_PROJECT_KEY`
+- [ ] `JIRA_ISSUE_TYPE`
+- [ ] Jira transition config:
+  - `JIRA_STATUS_TODO`
+  - `JIRA_STATUS_IN_PROGRESS`
+  - `JIRA_STATUS_IN_REVIEW`
+  - `JIRA_STATUS_DONE`
+
+#### 5.5 Phase 5 Implementation Tasks (Decision Complete)
+1. Simulator baseline
+- [ ] Add deterministic scenario fixtures and payload generators.
+- [ ] Add one-command trigger script to create incident and print `incident_id`.
+- [ ] Add poll script to track lifecycle until resolved/failed with timeout.
+
+2. End-to-end assertions
+- [ ] Validate incident status path (`processing` -> `awaiting_approval` -> `resolved`).
+- [ ] Validate Jira transition trace entries.
+- [ ] Validate PR metadata and merge policy outcomes.
+- [ ] Validate MTTR sanity (`resolved_at >= created_at`) and reject negative values in checks.
+
+3. Demo repo extraction
+- [ ] Create `resilix-demo-app` and `resilix-demo-config`.
+- [ ] Move stable fixture targets from current repo into demo repos.
+- [ ] Update backend config to target new repos by default in demo mode.
+- [ ] Re-run full smoke against deployed services and new repos.
+
+4. Cloud deployment hardening
+- [ ] Verify backend Cloud Run env/secret bindings.
+- [ ] Deploy frontend Cloud Run service and set backend base URL.
+- [ ] Validate CORS across deployed frontend/backend.
+- [ ] Add `/health` pre-demo check script.
+
+5. Presentation assets
+- [ ] Record deterministic demo run with timestamped checkpoints.
+- [ ] Finalize submission description (Gemini feature mapping + impact).
+- [ ] Publish concise operator runbook for judges/reviewers.
+
+#### 5.6 Phase 5 Test Plan
+- [ ] Unit: simulator scenario parser/generator determinism (seeded outputs).
+- [ ] Integration: trigger -> incident creation -> PR creation -> approval -> merge.
+- [ ] Contract: API response schema snapshots for frontend compatibility.
+- [ ] Smoke (deployed): run scripted alert and verify Jira + GitHub side effects.
+- [ ] Regression: existing backend/frontend suites remain green.
+
+#### 5.7 Acceptance Criteria (Phase 5 Complete)
+1. One command (or single script sequence) can trigger and complete a full incident lifecycle against deployed services.
+2. Jira and GitHub show real, non-mock progression for the same incident.
+3. Frontend displays live incident progression and final resolved state.
+4. Demo scenario is repeatable with predictable timings and outputs.
+5. Repositories are split (`resilix-demo-app`, `resilix-demo-config`) and wired in deployed config.
+
+**Deliverable**: Demo-simulation stack is production-like, repeatable, and submission-ready.
 
 ### Development Timeline Summary
 
@@ -2628,7 +2734,7 @@ data:
 | **2** | Frontend | Dashboard with approval gate |
 | **3** | DNS Simulator | Controllable failure/recovery |
 | **4** | Agent Refinement | Optimized for DNS scenario |
-| **5** | Integration | Demo-ready, submitted |
+| **5** | Integration & Demo Simulation | Repeatable deployed E2E demo with real Jira/GitHub side effects |
 
 ---
 
