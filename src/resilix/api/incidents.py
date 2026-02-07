@@ -39,6 +39,14 @@ async def approve_merge(incident_id: str) -> IncidentDetailResponse:
     state = await store.get(incident_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Incident not found")
+    settings = get_settings()
+    policy = state.setdefault("policy", {})
+    if isinstance(policy, dict):
+        # Enforce current runtime gate configuration at approval time so env updates apply immediately.
+        policy["require_ci_pass"] = settings.require_ci_pass
+        policy["require_codeowner_review"] = settings.require_codeowner_review
+        policy["merge_method"] = settings.merge_method
+
     remediation = state.get("remediation_result", {})
     pr_number = remediation.get("pr_number") if isinstance(remediation, dict) else None
     repository = None
@@ -60,7 +68,6 @@ async def approve_merge(incident_id: str) -> IncidentDetailResponse:
     if not decision.eligible:
         raise HTTPException(status_code=409, detail={"code": decision.code, "message": decision.message})
 
-    settings = get_settings()
     merge_ok = True
     if pr_number and repository:
         merge_ok = await code_provider.merge_pr(

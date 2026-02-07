@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 
@@ -103,3 +106,35 @@ async def test_approve_merge_returns_409_when_codeowner_review_missing(test_clie
 async def test_approve_merge_returns_404_for_missing_incident(test_client):
     approve_response = await test_client.post("/incidents/INC-DOESNOTEXIST/approve-merge")
     assert approve_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_approve_merge_uses_current_runtime_gate_settings_over_stale_policy(test_client):
+    response = await test_client.post("/webhook/prometheus", json=_payload())
+    incident_id = response.json()["incident_id"]
+
+    from resilix.services.session import get_session_store
+    import resilix.config.settings as settings_module
+
+    store = get_session_store()
+    state = await store.get(incident_id)
+    assert state is not None
+    state["ci_status"] = "pending"
+    state["codeowner_review_status"] = "pending"
+    state["policy"] = {"require_ci_pass": True, "require_codeowner_review": True}
+    if isinstance(state.get("thought_signature"), dict):
+        state["thought_signature"]["target_repository"] = None
+    await store.save(incident_id, state)
+
+    with patch.dict(
+        os.environ,
+        {"REQUIRE_CI_PASS": "false", "REQUIRE_CODEOWNER_REVIEW": "false"},
+        clear=False,
+    ):
+        settings_module.get_settings.cache_clear()
+        approve_response = await test_client.post(f"/incidents/{incident_id}/approve-merge")
+
+    assert approve_response.status_code == 200
+    detail = approve_response.json()
+    assert detail["approval_status"] == "approved"
+    assert detail["pr_status"] == "merged"
