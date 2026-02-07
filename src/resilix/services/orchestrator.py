@@ -261,7 +261,7 @@ class MockRunner:
             severity=validated.severity,
             service_name=validated.service_name,
         )
-        if settings.use_mock_mcp:
+        if settings.effective_use_mock_providers():
             ticket_provider, ticket_provider_name = MockTicketProvider(), "jira_mock"
             code_provider, code_provider_name = MockCodeProvider(), "github_mock"
         else:
@@ -358,7 +358,7 @@ class AdkRunner:
             from google.genai import types
         except Exception as exc:  # pragma: no cover - depends on ADK install
             raise RuntimeError(
-                "Google ADK not available; set USE_MOCK_MCP=true for Phase 1"
+                "Google ADK not available; set USE_MOCK_PROVIDERS=true for local mock mode"
             ) from exc
 
         settings = get_settings()
@@ -417,13 +417,20 @@ class AdkRunner:
 
 async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_agent: Any) -> Dict[str, Any]:
     settings = get_settings()
+    if settings.is_legacy_mock_flag_used():
+        logger.warning(
+            "Deprecated env USE_MOCK_MCP is in use; migrate to USE_MOCK_PROVIDERS",
+            legacy_flag="USE_MOCK_MCP",
+            canonical_flag="USE_MOCK_PROVIDERS",
+        )
     api_key = (settings.gemini_api_key or "").strip()
     usable_api_key = bool(api_key) and api_key.lower() not in _PLACEHOLDER_API_KEYS
+    use_mock_providers = settings.effective_use_mock_providers()
 
-    if settings.use_mock_mcp or not usable_api_key:
+    if use_mock_providers or not usable_api_key:
         logger.info(
             "Using mock runner",
-            use_mock_mcp=settings.use_mock_mcp,
+            use_mock_providers=use_mock_providers,
             has_usable_api_key=usable_api_key,
         )
         return await MockRunner().run(raw_alert, incident_id)

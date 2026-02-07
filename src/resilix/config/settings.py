@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Optional
 
@@ -28,7 +29,9 @@ class Settings(BaseSettings):
     database_url: Optional[str] = None
 
     # Feature flags
-    use_mock_mcp: bool = True
+    use_mock_providers: bool = True
+    # Deprecated alias kept for one migration cycle.
+    use_mock_mcp: Optional[bool] = None
     require_pr_approval: bool = True
     require_ci_pass: bool = True
     require_codeowner_review: bool = True
@@ -59,6 +62,16 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     cors_allowed_origins: str = "http://localhost:5173,http://localhost:3000"
+
+    def effective_use_mock_providers(self) -> bool:
+        if os.getenv("USE_MOCK_PROVIDERS") is not None:
+            return self.use_mock_providers
+        if os.getenv("USE_MOCK_MCP") is not None and self.use_mock_mcp is not None:
+            return self.use_mock_mcp
+        return self.use_mock_providers
+
+    def is_legacy_mock_flag_used(self) -> bool:
+        return os.getenv("USE_MOCK_MCP") is not None and os.getenv("USE_MOCK_PROVIDERS") is None
 
 
 @lru_cache
