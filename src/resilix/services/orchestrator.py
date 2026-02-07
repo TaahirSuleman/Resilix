@@ -70,12 +70,14 @@ def get_adk_runtime_status() -> dict[str, Any]:
     use_mock_providers = settings.effective_use_mock_providers()
     imports_ok, import_error = _adk_imports_available()
     ready = imports_ok and usable_api_key and not use_mock_providers
-    mode = "strict" if settings.adk_strict_mode else "fallback"
+    mock_fallback_allowed = settings.allow_mock_fallback and not settings.adk_strict_mode
+    mode = "strict" if not mock_fallback_allowed else "fallback"
     return {
         "adk_mode": mode,
         "adk_ready": ready,
         "adk_last_error": _ADK_LAST_ERROR or import_error,
         "adk_imports_ok": imports_ok,
+        "mock_fallback_allowed": mock_fallback_allowed,
     }
 
 
@@ -571,7 +573,7 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
     api_key = (settings.gemini_api_key or "").strip()
     usable_api_key = bool(api_key) and api_key.lower() not in _PLACEHOLDER_API_KEYS
     use_mock_providers = settings.effective_use_mock_providers()
-    strict_no_fallback = settings.adk_strict_mode and not settings.allow_mock_fallback
+    strict_no_fallback = settings.adk_strict_mode or not settings.allow_mock_fallback
 
     if use_mock_providers:
         reason = "mock_flag_enabled"

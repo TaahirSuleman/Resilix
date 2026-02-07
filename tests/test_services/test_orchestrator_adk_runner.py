@@ -285,3 +285,21 @@ async def test_run_orchestrator_strict_mode_blocks_mock_runner_when_adk_fails(
     trace = state.get("integration_trace", {})
     assert trace.get("execution_path") == "adk_unavailable"
     assert trace.get("execution_reason") == "adk_runtime_exception"
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_strict_mode_blocks_fallback_even_when_allow_flag_true(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("ADK_STRICT_MODE", "true")
+    monkeypatch.setenv("ALLOW_MOCK_FALLBACK", "true")
+    monkeypatch.setenv("GEMINI_API_KEY", "your_key")
+    settings_module.get_settings.cache_clear()
+
+    state = await run_orchestrator({"status": "firing", "alerts": []}, "INC-STRICT-003", root_agent=object())
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_unavailable"
+    assert trace.get("execution_reason") == "missing_or_placeholder_api_key"
