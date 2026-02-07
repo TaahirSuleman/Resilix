@@ -168,6 +168,8 @@ def _extract_timeline(state: dict[str, Any], created_at: datetime) -> list[Timel
 def compute_mttr(created_at: datetime, resolved_at: Optional[datetime]) -> Optional[float]:
     if not resolved_at:
         return None
+    if resolved_at < created_at:
+        return None
     delta = resolved_at - created_at
     return round(delta.total_seconds(), 3)
 

@@ -11,6 +11,12 @@ def test_compute_mttr_returns_seconds_when_resolved() -> None:
     assert compute_mttr(created_at, resolved_at) == 42.0
 
 
+def test_compute_mttr_returns_none_when_resolved_before_created() -> None:
+    created_at = datetime(2026, 2, 1, 12, 0, tzinfo=timezone.utc)
+    resolved_at = created_at - timedelta(seconds=5)
+    assert compute_mttr(created_at, resolved_at) is None
+
+
 def test_derive_status_fields_pending_approval() -> None:
     state = {
         "approval": {"required": True, "approved": False},
@@ -62,3 +68,32 @@ def test_state_to_incident_detail_contains_expected_fields() -> None:
     assert detail.pr_status.value == "merged"
     assert detail.approval_status.value == "approved"
     assert detail.mttr_seconds == 45.0
+
+
+def test_state_to_incident_detail_omits_invalid_mttr_when_resolved_before_created() -> None:
+    state = {
+        "created_at": "2026-02-01T12:10:00+00:00",
+        "resolved_at": "2026-02-01T12:00:00+00:00",
+        "validated_alert": {
+            "alert_id": "INC-999",
+            "is_actionable": True,
+            "severity": "critical",
+            "service_name": "checkout-api",
+            "error_type": "HighErrorRate",
+            "error_rate": 5.0,
+            "affected_endpoints": [],
+            "triggered_at": "2026-02-01T12:10:00+00:00",
+            "enrichment": {},
+            "triage_reason": "threshold exceeded",
+        },
+        "remediation_result": {
+            "success": True,
+            "action_taken": "fix_code",
+            "pr_number": 101,
+            "pr_url": "https://example.com/pr/101",
+            "pr_merged": True,
+            "execution_time_seconds": 8.0,
+        },
+    }
+    detail = state_to_incident_detail("INC-999", state)
+    assert detail.mttr_seconds is None

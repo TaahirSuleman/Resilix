@@ -139,7 +139,7 @@ python -m resilix.run_adk --alert-file ./alert.json
 
 - `USE_MOCK_PROVIDERS=true` runs mock providers (no external Jira/GitHub calls).
 - `USE_MOCK_PROVIDERS=false` runs real provider integrations and requires valid credentials.
-- `USE_MOCK_MCP` is temporarily supported as a deprecated alias for backward compatibility.
+- `USE_MOCK_MCP` is temporarily supported as a deprecated alias for backward compatibility and should be unset in deployed environments.
 
 ## Integration Mode
 
