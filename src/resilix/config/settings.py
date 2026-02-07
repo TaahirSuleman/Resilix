@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     require_ci_pass: bool = True
     require_codeowner_review: bool = True
     merge_method: str = "squash"
+    adk_strict_mode: bool = False
+    allow_mock_fallback: bool = True
 
     # Integration modes
     jira_integration_mode: str = "api"

@@ -70,6 +70,8 @@ Environment:
 | `REQUIRE_CI_PASS` | Optional | `true` requires CI before merge |
 | `REQUIRE_CODEOWNER_REVIEW` | Optional | `true` requires codeowner review before merge |
 | `MERGE_METHOD` | Optional | Defaults to `squash` |
+| `ADK_STRICT_MODE` | Optional | `true` enforces ADK-only execution path |
+| `ALLOW_MOCK_FALLBACK` | Optional | `false` disables fallback to `MockRunner` |
 | `GITHUB_TOKEN` | Optional | Required for direct GitHub integration |
 | `GITHUB_OWNER` | Optional | Org/user owner for demo repos |
 | `GITHUB_DEFAULT_BASE_BRANCH` | Optional | Defaults to `main` |

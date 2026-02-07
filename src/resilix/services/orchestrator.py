@@ -30,6 +30,7 @@ _PLACEHOLDER_API_KEYS = {
 }
 
 _ADK_UNSUPPORTED_DB_QUERY_KEYS = {"sslmode", "channel_binding"}
+_ADK_LAST_ERROR: str | None = None
 
 
 def _parse_dt(value: Any) -> datetime:
@@ -46,6 +47,65 @@ def _parse_dt(value: Any) -> datetime:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed
     return datetime.now(timezone.utc)
+
+
+def _set_adk_last_error(error: str | None) -> None:
+    global _ADK_LAST_ERROR
+    _ADK_LAST_ERROR = error
+
+
+def _adk_imports_available() -> tuple[bool, str | None]:
+    try:
+        import google.adk.runners  # noqa: F401
+        import google.genai  # noqa: F401
+        return True, None
+    except Exception as exc:  # pragma: no cover - env dependent
+        return False, str(exc)
+
+
+def get_adk_runtime_status() -> dict[str, Any]:
+    settings = get_settings()
+    api_key = (settings.gemini_api_key or "").strip()
+    usable_api_key = bool(api_key) and api_key.lower() not in _PLACEHOLDER_API_KEYS
+    use_mock_providers = settings.effective_use_mock_providers()
+    imports_ok, import_error = _adk_imports_available()
+    ready = imports_ok and usable_api_key and not use_mock_providers
+    mode = "strict" if settings.adk_strict_mode else "fallback"
+    return {
+        "adk_mode": mode,
+        "adk_ready": ready,
+        "adk_last_error": _ADK_LAST_ERROR or import_error,
+        "adk_imports_ok": imports_ok,
+    }
+
+
+def _build_adk_unavailable_state(
+    *,
+    raw_alert: Dict[str, Any],
+    reason: str,
+    error: str | None,
+) -> Dict[str, Any]:
+    state: dict[str, Any] = {
+        "raw_alert": raw_alert,
+        "ci_status": "pending",
+        "codeowner_review_status": "pending",
+        "remediation_result": RemediationResult(
+            success=False,
+            action_taken=RecommendedAction.FIX_CODE,
+            pr_merged=False,
+            execution_time_seconds=0.0,
+            error_message=error or reason,
+        ).model_dump(),
+        "integration_trace": {
+            "ticket_provider": "unknown",
+            "code_provider": "unknown",
+            "fallback_used": False,
+            "execution_path": "adk_unavailable",
+            "execution_reason": reason,
+            "adk_error": error,
+        },
+    }
+    return state
 
 
 def _signal_map(validated_alert) -> dict[str, int]:
@@ -511,8 +571,15 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
     api_key = (settings.gemini_api_key or "").strip()
     usable_api_key = bool(api_key) and api_key.lower() not in _PLACEHOLDER_API_KEYS
     use_mock_providers = settings.effective_use_mock_providers()
+    strict_no_fallback = settings.adk_strict_mode and not settings.allow_mock_fallback
 
-    if use_mock_providers or not usable_api_key:
+    if use_mock_providers:
+        reason = "mock_flag_enabled"
+        error = "USE_MOCK_PROVIDERS is true"
+        _set_adk_last_error(error)
+        if strict_no_fallback:
+            logger.error("ADK strict mode prevents mock runner usage", reason=reason, incident_id=incident_id)
+            return _build_adk_unavailable_state(raw_alert=raw_alert, reason=reason, error=error)
         logger.info(
             "Using mock runner",
             use_mock_providers=use_mock_providers,
@@ -521,24 +588,60 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
         state = await MockRunner().run(raw_alert, incident_id)
         trace = state.setdefault("integration_trace", {})
         trace["execution_path"] = "mock_runner"
+        trace["execution_reason"] = reason
+        trace["adk_error"] = error
+        return state
+
+    if not usable_api_key:
+        reason = "missing_or_placeholder_api_key"
+        error = "Gemini API key is missing or placeholder"
+        _set_adk_last_error(error)
+        if strict_no_fallback:
+            logger.error("ADK strict mode prevents mock fallback for unusable API key", incident_id=incident_id)
+            return _build_adk_unavailable_state(raw_alert=raw_alert, reason=reason, error=error)
+        logger.info(
+            "Using mock runner",
+            use_mock_providers=use_mock_providers,
+            has_usable_api_key=usable_api_key,
+        )
+        state = await MockRunner().run(raw_alert, incident_id)
+        trace = state.setdefault("integration_trace", {})
+        trace["execution_path"] = "mock_runner"
+        trace["execution_reason"] = reason
+        trace["adk_error"] = error
         return state
 
     agent_instance = root_agent() if callable(root_agent) else root_agent
     try:
         state = await AdkRunner(agent_instance).run(raw_alert, incident_id)
+        _set_adk_last_error(None)
         trace = state.setdefault("integration_trace", {})
         trace.setdefault("ticket_provider", "unknown")
         trace.setdefault("code_provider", "unknown")
         trace.setdefault("fallback_used", False)
         trace["execution_path"] = "adk"
+        trace["execution_reason"] = "adk_success"
+        trace.pop("adk_error", None)
         return state
     except Exception as exc:
+        error = str(exc)
+        _set_adk_last_error(error)
+        reason = "adk_runtime_exception"
+        if strict_no_fallback:
+            logger.error(
+                "ADK strict mode: orchestration failed without fallback",
+                error=error,
+                incident_id=incident_id,
+            )
+            return _build_adk_unavailable_state(raw_alert=raw_alert, reason=reason, error=error)
         logger.warning(
             "ADK runner failed; falling back to mock runner for this incident",
-            error=str(exc),
+            error=error,
             incident_id=incident_id,
         )
         state = await MockRunner().run(raw_alert, incident_id)
         trace = state.setdefault("integration_trace", {})
         trace["execution_path"] = "mock_runner"
+        trace["execution_reason"] = reason
+        trace["adk_error"] = error
         return state

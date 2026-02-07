@@ -244,3 +244,44 @@ async def test_run_orchestrator_supports_legacy_use_mock_mcp_flag(monkeypatch: p
     }
     state = await run_orchestrator(payload, "INC-LEGACY-MOCK-FLAG-001", root_agent=object())
     assert "validated_alert" in state
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_strict_mode_blocks_mock_runner_when_mock_flag_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "true")
+    monkeypatch.setenv("ADK_STRICT_MODE", "true")
+    monkeypatch.setenv("ALLOW_MOCK_FALLBACK", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    state = await run_orchestrator({"status": "firing", "alerts": []}, "INC-STRICT-001", root_agent=object())
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_unavailable"
+    assert trace.get("execution_reason") == "mock_flag_enabled"
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_strict_mode_blocks_mock_runner_when_adk_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("ADK_STRICT_MODE", "true")
+    monkeypatch.setenv("ALLOW_MOCK_FALLBACK", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    async def _raise_run(self, raw_alert: dict, incident_id: str):  # type: ignore[no-untyped-def]
+        raise RuntimeError("adk boom")
+
+    monkeypatch.setattr("resilix.services.orchestrator.AdkRunner.run", _raise_run)
+
+    state = await run_orchestrator({"status": "firing", "alerts": []}, "INC-STRICT-002", root_agent=object())
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_unavailable"
+    assert trace.get("execution_reason") == "adk_runtime_exception"

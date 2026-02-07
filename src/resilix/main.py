@@ -11,11 +11,16 @@ from fastapi.staticfiles import StaticFiles
 from resilix.api import health_router, incidents_router, webhooks_router
 from resilix.config import get_settings
 from resilix.config.logging import configure_logging
+from resilix.services.orchestrator import get_adk_runtime_status
 from resilix.services.session import ensure_session_store_initialized
 
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
+    settings = get_settings()
+    adk_status = get_adk_runtime_status()
+    if settings.adk_strict_mode and not settings.allow_mock_fallback and not adk_status["adk_ready"]:
+        raise RuntimeError(f"ADK strict mode startup preflight failed: {adk_status['adk_last_error']}")
     await ensure_session_store_initialized()
     yield
 

@@ -36,6 +36,9 @@ async def test_health_reports_canonical_mock_mode(monkeypatch: pytest.MonkeyPatc
             assert "frontend_served" in body
             assert "app_version" in body
             assert "build_sha" in body
+            assert "adk_mode" in body
+            assert "adk_ready" in body
+            assert "adk_last_error" in body
 
 
 @pytest.mark.asyncio
@@ -66,3 +69,6 @@ async def test_health_reports_legacy_flag_usage(monkeypatch: pytest.MonkeyPatch)
             assert "frontend_served" in body
             assert "app_version" in body
             assert "build_sha" in body
+            assert "adk_mode" in body
+            assert "adk_ready" in body
+            assert "adk_last_error" in body
