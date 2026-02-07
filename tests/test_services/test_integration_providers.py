@@ -35,6 +35,19 @@ class _FakeAsyncClient:
 
     async def get(self, url: str, **kwargs: Any) -> _FakeResponse:
         self.calls.append(("GET", url, kwargs))
+        if "/issue/" in url and url.endswith("/transitions"):
+            return _FakeResponse(
+                200,
+                {
+                    "transitions": [
+                        {"id": "1", "name": "Start Progress", "to": {"name": "In Progress"}},
+                        {"id": "2", "name": "Ready for Review", "to": {"name": "In Review"}},
+                        {"id": "3", "name": "Done", "to": {"name": "Done"}},
+                    ]
+                },
+            )
+        if "/issue/" in url:
+            return _FakeResponse(200, {"fields": {"status": {"name": "To Do"}}})
         if url.endswith("/status"):
             return _FakeResponse(200, {"state": "success"})
         if "/reviews" in url:
@@ -82,6 +95,52 @@ async def test_jira_direct_provider_normalizes_ticket(monkeypatch: pytest.Monkey
     )
     assert result.ticket_key == "SRE-101"
     assert result.ticket_url.endswith("/browse/SRE-101")
+
+
+@pytest.mark.asyncio
+async def test_jira_direct_transition_exact_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+    provider = JiraDirectProvider(
+        jira_url="https://example.atlassian.net",
+        username="user@example.com",
+        api_token="token",
+        project_key="SRE",
+        issue_type="Bug",
+    )
+    result = await provider.transition_ticket(ticket_key="SRE-101", target_status="In Progress")
+    assert result["ok"] is True
+    assert result["applied_transition_id"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_jira_direct_transition_alias_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+    provider = JiraDirectProvider(
+        jira_url="https://example.atlassian.net",
+        username="user@example.com",
+        api_token="token",
+        project_key="SRE",
+        issue_type="Bug",
+        transition_aliases='{"in review":["ready for review"]}',
+    )
+    result = await provider.transition_ticket(ticket_key="SRE-101", target_status="In Review")
+    assert result["ok"] is True
+    assert result["applied_transition_id"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_jira_direct_transition_unavailable_non_strict(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+    provider = JiraDirectProvider(
+        jira_url="https://example.atlassian.net",
+        username="user@example.com",
+        api_token="token",
+        project_key="SRE",
+        issue_type="Bug",
+    )
+    result = await provider.transition_ticket(ticket_key="SRE-101", target_status="Blocked")
+    assert result["ok"] is False
+    assert "No transition found" in str(result["reason"])
 
 
 @pytest.mark.asyncio

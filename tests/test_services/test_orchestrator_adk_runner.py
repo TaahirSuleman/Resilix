@@ -158,6 +158,8 @@ async def test_run_orchestrator_falls_back_to_mock_when_adk_run_raises(
     monkeypatch.setenv("USE_MOCK_MCP", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "mock")
     settings_module.get_settings.cache_clear()
 
     async def _raise_run(self, raw_alert: dict, incident_id: str):  # type: ignore[no-untyped-def]
@@ -195,6 +197,8 @@ async def test_run_orchestrator_uses_mock_for_placeholder_api_key_without_creati
     monkeypatch.setenv("USE_MOCK_MCP", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "your_key")
     monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "mock")
     settings_module.get_settings.cache_clear()
 
     def _raise_if_called():

@@ -20,6 +20,8 @@ async def test_client() -> AsyncIterator[AsyncClient]:
         "USE_MOCK_MCP": "true",
         "DATABASE_URL": "",
         "REQUIRE_PR_APPROVAL": "true",
+        "JIRA_INTEGRATION_MODE": "mock",
+        "GITHUB_INTEGRATION_MODE": "mock",
     }
 
     with patch.dict(os.environ, env_overrides, clear=False):

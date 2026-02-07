@@ -34,6 +34,8 @@ async def test_approve_merge_success_when_ci_passed_and_pr_exists(test_client):
     detail = approve_response.json()
     assert detail["pr_status"] == "merged"
     assert detail["approval_status"] == "approved"
+    transitions = (detail.get("integration_trace") or {}).get("jira_transitions") or []
+    assert any(item.get("to_status") == "Done" and item.get("ok") is True for item in transitions)
 
 
 @pytest.mark.asyncio
