@@ -1,3 +1,11 @@
+# Build the frontend
+FROM node:20-slim AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ .
+RUN npm run build
+
 # Use an official Python runtime as a parent image
 FROM python:3.12-slim
 
@@ -18,6 +26,9 @@ COPY README.md .
 
 # Copy the rest of the application
 COPY src/ src/
+
+# Copy the frontend build artifacts
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 # Install dependencies
 # --system installs into the system python, which is fine in a container

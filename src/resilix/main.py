@@ -37,6 +37,9 @@ def create_app() -> FastAPI:
     app.include_router(incidents_router)
 
     dist_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if not dist_dir.exists():
+        dist_dir = Path("/app/frontend/dist")
+
     if dist_dir.exists():
         app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 
