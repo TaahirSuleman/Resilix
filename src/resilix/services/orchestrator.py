@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Any, Callable, Dict
 from zlib import crc32
 
@@ -27,6 +28,8 @@ _PLACEHOLDER_API_KEYS = {
     "replace_me",
     "replace-with-real-key",
 }
+
+_ADK_UNSUPPORTED_DB_QUERY_KEYS = {"sslmode", "channel_binding"}
 
 
 def _parse_dt(value: Any) -> datetime:
@@ -171,10 +174,11 @@ class MockRunner:
         service_name = validated_alert.service_name
         evidence_chain = _build_evidence_chain(raw_alert, service_name)
 
+        settings = get_settings()
         repository = (
             raw_alert.get("repository")
             or ((raw_alert.get("alerts") or [{}])[0].get("labels", {}).get("repository"))
-            or "acme/service-platform"
+            or f"{settings.github_owner}/resilix-demo-app"
         )
 
         if category == RootCauseCategory.CONFIG_ERROR:
@@ -216,12 +220,13 @@ class MockRunner:
     ) -> RemediationResult:
         pr_number = (crc32(incident_id.encode("utf-8")) % 9000) + 1000
         branch_name = f"fix/resilix-{incident_id.lower()}"
+        repository = thought_signature.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app"
         return RemediationResult(
             success=True,
             action_taken=thought_signature.recommended_action,
             branch_name=branch_name,
             pr_number=pr_number,
-            pr_url=f"https://github.com/acme/service-platform/pull/{pr_number}",
+            pr_url=f"https://github.com/{repository}/pull/{pr_number}",
             pr_merged=False,
             execution_time_seconds=11.0,
         )
@@ -268,19 +273,59 @@ class MockRunner:
             ticket_provider, ticket_provider_name = get_ticket_provider()
             code_provider, code_provider_name = get_code_provider()
 
-        jira_ticket = await ticket_provider.create_incident_ticket(
-            incident_id=incident_id,
-            summary=normalized_ticket.summary,
-            description=thought_signature.investigation_summary,
-            priority=normalized_ticket.priority,
-        )
-        remediation = await code_provider.create_remediation_pr(
-            incident_id=incident_id,
-            repository=thought_signature.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
-            target_file=thought_signature.target_file or "README.md",
-            action=thought_signature.recommended_action,
-            summary=thought_signature.root_cause,
-        )
+        integration_trace = {
+            "ticket_provider": ticket_provider_name,
+            "code_provider": code_provider_name,
+            "fallback_used": ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock"),
+        }
+
+        try:
+            jira_ticket = await ticket_provider.create_incident_ticket(
+                incident_id=incident_id,
+                summary=normalized_ticket.summary,
+                description=thought_signature.investigation_summary,
+                priority=normalized_ticket.priority,
+            )
+        except Exception as exc:
+            state["thought_signature"] = thought_signature
+            state["jira_ticket"] = None
+            state["remediation_result"] = RemediationResult(
+                success=False,
+                action_taken=thought_signature.recommended_action,
+                pr_merged=False,
+                execution_time_seconds=0.0,
+                error_message=f"Jira provider failure: {exc}",
+            ).model_dump()
+            state["ci_status"] = "pending"
+            state["codeowner_review_status"] = "pending"
+            integration_trace["provider_error"] = str(exc)
+            state["integration_trace"] = integration_trace
+            return state
+
+        try:
+            remediation = await code_provider.create_remediation_pr(
+                incident_id=incident_id,
+                repository=thought_signature.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
+                target_file=thought_signature.target_file or "README.md",
+                action=thought_signature.recommended_action,
+                summary=thought_signature.root_cause,
+            )
+        except Exception as exc:
+            state["thought_signature"] = thought_signature
+            state["jira_ticket"] = jira_ticket
+            state["remediation_result"] = RemediationResult(
+                success=False,
+                action_taken=thought_signature.recommended_action,
+                pr_merged=False,
+                execution_time_seconds=0.0,
+                error_message=f"GitHub provider failure: {exc}",
+            ).model_dump()
+            state["ci_status"] = "pending"
+            state["codeowner_review_status"] = "pending"
+            integration_trace["provider_error"] = str(exc)
+            state["integration_trace"] = integration_trace
+            return state
+
         gate_status = None
         if remediation.pr_number and thought_signature.target_repository:
             gate_status = await code_provider.get_merge_gate_status(
@@ -291,11 +336,7 @@ class MockRunner:
         state["thought_signature"] = thought_signature
         state["jira_ticket"] = jira_ticket
         state["remediation_result"] = remediation.model_dump()
-        state["integration_trace"] = {
-            "ticket_provider": ticket_provider_name,
-            "code_provider": code_provider_name,
-            "fallback_used": ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock"),
-        }
+        state["integration_trace"] = integration_trace
         await _transition_jira_ticket(
             state=state,
             ticket_provider=ticket_provider,
@@ -364,7 +405,7 @@ class AdkRunner:
         settings = get_settings()
 
         if settings.database_url:
-            db_url = settings.database_url
+            db_url = self._normalize_database_url_for_adk(settings.database_url)
             try:
                 session_service = DatabaseSessionService(db_url)
             except Exception as exc:
@@ -401,18 +442,55 @@ class AdkRunner:
             parts=[types.Part.from_text(text=f"Process incident alert: {raw_alert}")],
         )
 
-        async for _event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=message,
-        ):
-            # Consume events until completion
-            pass
-
-        session = await session_service.get_session(
-            app_name="resilix", user_id=user_id, session_id=session_id
-        )
+        try:
+            async for _event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                # Consume events until completion
+                pass
+            session = await session_service.get_session(
+                app_name="resilix", user_id=user_id, session_id=session_id
+            )
+        except TypeError as exc:
+            # Some DB URLs contain query params unsupported by ADK's database session backend.
+            logger.warning(
+                "ADK session service failed at runtime; retrying with in-memory session",
+                error=str(exc),
+            )
+            in_memory_service = InMemorySessionService()
+            runner = Runner(
+                app_name="resilix",
+                agent=self._root_agent,
+                session_service=in_memory_service,
+            )
+            await in_memory_service.create_session(
+                app_name="resilix",
+                user_id=user_id,
+                session_id=session_id,
+                state={"raw_alert": raw_alert, "incident_id": incident_id},
+            )
+            async for _event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                pass
+            session = await in_memory_service.get_session(
+                app_name="resilix", user_id=user_id, session_id=session_id
+            )
         return session.state if session else {"raw_alert": raw_alert}
+
+    @staticmethod
+    def _normalize_database_url_for_adk(db_url: str) -> str:
+        parsed = urlsplit(db_url)
+        query_items = parse_qsl(parsed.query, keep_blank_values=True)
+        filtered_items = [(k, v) for k, v in query_items if k.lower() not in _ADK_UNSUPPORTED_DB_QUERY_KEYS]
+        if len(filtered_items) == len(query_items):
+            return db_url
+        normalized_query = urlencode(filtered_items)
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, normalized_query, parsed.fragment))
 
 
 async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_agent: Any) -> Dict[str, Any]:
