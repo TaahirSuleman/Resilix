@@ -78,6 +78,12 @@ Environment:
 | `JIRA_API_TOKEN` | Optional | Jira API token |
 | `JIRA_PROJECT_KEY` | Optional | Jira project key |
 | `JIRA_ISSUE_TYPE` | Optional | Defaults to `Bug` |
+| `JIRA_STATUS_TODO` | Optional | Defaults to `To Do` |
+| `JIRA_STATUS_IN_PROGRESS` | Optional | Defaults to `In Progress` |
+| `JIRA_STATUS_IN_REVIEW` | Optional | Defaults to `In Review` |
+| `JIRA_STATUS_DONE` | Optional | Defaults to `Done` |
+| `JIRA_TRANSITION_STRICT` | Optional | `true` makes transition failures hard-fail |
+| `JIRA_TRANSITION_ALIASES` | Optional | CSV/JSON aliases for workflow names |
 | `LOG_LEVEL` | Optional | Defaults to `INFO` |
 
 ## Run via Webhook (FastAPI)
