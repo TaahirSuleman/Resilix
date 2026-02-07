@@ -64,6 +64,7 @@ async def test_incident_detail_schema_snapshot(test_client):
         "approval_status",
         "created_at",
         "incident_id",
+        "integration_trace",
         "jira_ticket",
         "mttr_seconds",
         "pr_status",

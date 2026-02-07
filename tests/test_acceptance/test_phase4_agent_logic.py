@@ -58,12 +58,16 @@ async def test_generic_config_error_lifecycle(test_client):
     assert body["status"] == "awaiting_approval"
     assert body["thought_signature"]["root_cause_category"] == "config_error"
     assert body["remediation_result"]["action_taken"] == "config_change"
+    pre_transitions = (body.get("integration_trace") or {}).get("jira_transitions") or []
+    assert [item.get("to_status") for item in pre_transitions[:3]] == ["To Do", "In Progress", "In Review"]
 
     approved = await test_client.post(f"/incidents/{incident_id}/approve-merge")
     assert approved.status_code == 200
     final_body = approved.json()
     assert final_body["status"] == "resolved"
     assert final_body["pr_status"] == "merged"
+    post_transitions = (final_body.get("integration_trace") or {}).get("jira_transitions") or []
+    assert any(item.get("to_status") == "Done" and item.get("ok") is True for item in post_transitions)
 
 
 @pytest.mark.asyncio

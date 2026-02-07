@@ -35,8 +35,20 @@ def evaluate_approval_request(state: dict[str, Any]) -> MergeDecision:
     if _is_merged(remediation):
         return MergeDecision(False, "already_merged", "PR already merged")
 
-    if state.get("ci_status") != "ci_passed":
+    policy = state.get("policy", {}) if isinstance(state.get("policy"), dict) else {}
+    require_ci_pass = bool(policy.get("require_ci_pass", True))
+    require_codeowner_review = bool(policy.get("require_codeowner_review", True))
+
+    if require_ci_pass and state.get("ci_status") != "ci_passed":
         return MergeDecision(False, "ci_not_passed", "Merge approval requires CI passed")
+
+    review_status = str(state.get("codeowner_review_status", "pending"))
+    if require_codeowner_review and review_status != "approved":
+        return MergeDecision(
+            False,
+            "codeowner_review_required",
+            "Codeowner review approval is required before merge",
+        )
 
     approval = state.get("approval", {})
     required = bool(approval.get("required", False))
@@ -55,8 +67,16 @@ def evaluate_merge_eligibility(state: dict[str, Any]) -> MergeDecision:
     if _is_merged(remediation):
         return MergeDecision(False, "already_merged", "PR already merged")
 
-    if state.get("ci_status") != "ci_passed":
+    policy = state.get("policy", {}) if isinstance(state.get("policy"), dict) else {}
+    require_ci_pass = bool(policy.get("require_ci_pass", True))
+    require_codeowner_review = bool(policy.get("require_codeowner_review", True))
+
+    if require_ci_pass and state.get("ci_status") != "ci_passed":
         return MergeDecision(False, "ci_not_passed", "CI checks are not complete")
+
+    review_status = str(state.get("codeowner_review_status", "pending"))
+    if require_codeowner_review and review_status != "approved":
+        return MergeDecision(False, "codeowner_review_required", "Codeowner review is pending")
 
     approval = state.get("approval", {})
     required = bool(approval.get("required", False))

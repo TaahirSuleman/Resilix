@@ -243,6 +243,7 @@ def state_to_incident_detail(incident_id: str, state: dict[str, Any]) -> Inciden
         jira_ticket=_as_model(JiraTicketResult, state.get("jira_ticket")),
         remediation_result=remediation,
         timeline=timeline,
+        integration_trace=state.get("integration_trace"),
     )
 
 

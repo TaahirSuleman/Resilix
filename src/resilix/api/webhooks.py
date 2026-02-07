@@ -37,7 +37,14 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
         "raw_alert": payload,
         "created_at": created_at,
         "approval": {"required": settings.require_pr_approval, "approved": False, "approved_at": None},
+        "policy": {
+            "require_ci_pass": settings.require_ci_pass,
+            "require_codeowner_review": settings.require_codeowner_review,
+            "merge_method": settings.merge_method,
+        },
         "ci_status": "pending",
+        "codeowner_review_status": "pending",
+        "integration_trace": {"ticket_provider": "unknown", "code_provider": "unknown", "fallback_used": False},
         "timeline": [],
     }
     append_timeline_event(
@@ -50,9 +57,11 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
 
     state = await run_orchestrator(payload, incident_id, get_root_agent)
     merged_state = {**initial_state, **state}
+    initial_timeline = list(initial_state.get("timeline", []))
+    state_timeline = list(state.get("timeline", [])) if isinstance(state.get("timeline"), list) else []
+    merged_state["timeline"] = initial_timeline + state_timeline
     merged_state.setdefault("approval", initial_state["approval"])
     merged_state.setdefault("ci_status", initial_state["ci_status"])
-    merged_state.setdefault("timeline", initial_state["timeline"])
 
     if merged_state.get("validated_alert"):
         append_timeline_event(merged_state, TimelineEventType.ALERT_VALIDATED, agent="Sentinel")
