@@ -10,6 +10,7 @@ from resilix.config import get_settings
 from resilix.models.remediation import RecommendedAction, RemediationResult
 from resilix.models.thought_signature import Evidence, RootCauseCategory, ThoughtSignature
 from resilix.services.admin_service import build_ticket_from_signature
+from resilix.services.integrations import get_code_provider, get_ticket_provider
 from resilix.services.pr_merge_policy import evaluate_merge_eligibility
 from resilix.services.sentinel_service import evaluate_alert
 from resilix.tools.log_tools import query_logs
@@ -210,21 +211,50 @@ class MockRunner:
             raw_alert=raw_alert,
             validated_alert=validated,
         )
-        jira_ticket = build_ticket_from_signature(
+        normalized_ticket = build_ticket_from_signature(
             incident_id=incident_id,
             signature=thought_signature,
             severity=validated.severity,
             service_name=validated.service_name,
         )
-        remediation = self._build_remediation_result(
+        ticket_provider, ticket_provider_name = get_ticket_provider()
+        jira_ticket = await ticket_provider.create_incident_ticket(
             incident_id=incident_id,
-            thought_signature=thought_signature,
+            summary=normalized_ticket.summary,
+            description=thought_signature.investigation_summary,
+            priority=normalized_ticket.priority,
         )
+
+        code_provider, code_provider_name = get_code_provider()
+        remediation = await code_provider.create_remediation_pr(
+            incident_id=incident_id,
+            repository=thought_signature.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
+            target_file=thought_signature.target_file or "README.md",
+            action=thought_signature.recommended_action,
+            summary=thought_signature.root_cause,
+        )
+        gate_status = None
+        if remediation.pr_number and thought_signature.target_repository:
+            gate_status = await code_provider.get_merge_gate_status(
+                repository=thought_signature.target_repository,
+                pr_number=remediation.pr_number,
+            )
 
         state["thought_signature"] = thought_signature
         state["jira_ticket"] = jira_ticket
         state["remediation_result"] = remediation.model_dump()
-        state["ci_status"] = "ci_passed"
+        state["integration_trace"] = {
+            "ticket_provider": ticket_provider_name,
+            "code_provider": code_provider_name,
+            "fallback_used": ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock"),
+        }
+        if gate_status is not None:
+            state["ci_status"] = "ci_passed" if gate_status.ci_passed else "pending"
+            state["codeowner_review_status"] = "approved" if gate_status.codeowner_reviewed else "pending"
+            state["integration_trace"]["gate_details"] = gate_status.details
+        else:
+            state["ci_status"] = "ci_passed"
+            state["codeowner_review_status"] = "pending"
         state["agent_trace"]["sherlock"] = {
             "thinking_level": settings.sherlock_thinking_level,
             "include_thoughts": settings.include_thoughts,

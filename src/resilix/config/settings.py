@@ -30,6 +30,25 @@ class Settings(BaseSettings):
     # Feature flags
     use_mock_mcp: bool = True
     require_pr_approval: bool = True
+    require_ci_pass: bool = True
+    require_codeowner_review: bool = True
+    merge_method: str = "squash"
+
+    # Integration modes
+    jira_integration_mode: str = "api"
+    github_integration_mode: str = "api"
+
+    # GitHub integration
+    github_token: Optional[str] = None
+    github_owner: str = "PLACEHOLDER_OWNER"
+    github_default_base_branch: str = "main"
+
+    # Jira integration
+    jira_url: Optional[str] = None
+    jira_username: Optional[str] = None
+    jira_api_token: Optional[str] = None
+    jira_project_key: str = "PLACEHOLDER_JIRA_PROJECT_KEY"
+    jira_issue_type: str = "Bug"
 
     # Logging
     log_level: str = "INFO"

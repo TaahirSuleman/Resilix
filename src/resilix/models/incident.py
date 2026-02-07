@@ -59,6 +59,7 @@ class IncidentDetailResponse(BaseModel):
     jira_ticket: Optional[JiraTicketResult] = None
     remediation_result: Optional[RemediationResult] = None
     timeline: list[TimelineEvent] = Field(default_factory=list)
+    integration_trace: Optional[dict[str, object]] = None
 
 
 class IncidentListResponse(BaseModel):

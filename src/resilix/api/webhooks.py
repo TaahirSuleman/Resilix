@@ -37,7 +37,14 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
         "raw_alert": payload,
         "created_at": created_at,
         "approval": {"required": settings.require_pr_approval, "approved": False, "approved_at": None},
+        "policy": {
+            "require_ci_pass": settings.require_ci_pass,
+            "require_codeowner_review": settings.require_codeowner_review,
+            "merge_method": settings.merge_method,
+        },
         "ci_status": "pending",
+        "codeowner_review_status": "pending",
+        "integration_trace": {"ticket_provider": "unknown", "code_provider": "unknown", "fallback_used": False},
         "timeline": [],
     }
     append_timeline_event(
