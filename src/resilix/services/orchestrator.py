@@ -254,12 +254,14 @@ class MockRunner:
         if not validated.is_actionable:
             state["ci_status"] = "pending"
             return state
+        append_timeline_event(state, TimelineEventType.ALERT_VALIDATED, agent="Sentinel")
 
         thought_signature = self._build_thought_signature(
             incident_id=incident_id,
             raw_alert=raw_alert,
             validated_alert=validated,
         )
+        append_timeline_event(state, TimelineEventType.ROOT_CAUSE_IDENTIFIED, agent="Sherlock")
         normalized_ticket = build_ticket_from_signature(
             incident_id=incident_id,
             signature=thought_signature,
@@ -277,7 +279,9 @@ class MockRunner:
             "ticket_provider": ticket_provider_name,
             "code_provider": code_provider_name,
             "fallback_used": ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock"),
+            "execution_path": "mock_runner",
         }
+        state["integration_trace"] = integration_trace
 
         try:
             jira_ticket = await ticket_provider.create_incident_ticket(
@@ -286,6 +290,7 @@ class MockRunner:
                 description=thought_signature.investigation_summary,
                 priority=normalized_ticket.priority,
             )
+            append_timeline_event(state, TimelineEventType.TICKET_CREATED, agent="Administrator")
         except Exception as exc:
             state["thought_signature"] = thought_signature
             state["jira_ticket"] = None
@@ -299,44 +304,8 @@ class MockRunner:
             state["ci_status"] = "pending"
             state["codeowner_review_status"] = "pending"
             integration_trace["provider_error"] = str(exc)
-            state["integration_trace"] = integration_trace
             return state
 
-        try:
-            remediation = await code_provider.create_remediation_pr(
-                incident_id=incident_id,
-                repository=thought_signature.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
-                target_file=thought_signature.target_file or "README.md",
-                action=thought_signature.recommended_action,
-                summary=thought_signature.root_cause,
-            )
-        except Exception as exc:
-            state["thought_signature"] = thought_signature
-            state["jira_ticket"] = jira_ticket
-            state["remediation_result"] = RemediationResult(
-                success=False,
-                action_taken=thought_signature.recommended_action,
-                pr_merged=False,
-                execution_time_seconds=0.0,
-                error_message=f"GitHub provider failure: {exc}",
-            ).model_dump()
-            state["ci_status"] = "pending"
-            state["codeowner_review_status"] = "pending"
-            integration_trace["provider_error"] = str(exc)
-            state["integration_trace"] = integration_trace
-            return state
-
-        gate_status = None
-        if remediation.pr_number and thought_signature.target_repository:
-            gate_status = await code_provider.get_merge_gate_status(
-                repository=thought_signature.target_repository,
-                pr_number=remediation.pr_number,
-            )
-
-        state["thought_signature"] = thought_signature
-        state["jira_ticket"] = jira_ticket
-        state["remediation_result"] = remediation.model_dump()
-        state["integration_trace"] = integration_trace
         await _transition_jira_ticket(
             state=state,
             ticket_provider=ticket_provider,
@@ -351,6 +320,42 @@ class MockRunner:
             target_status=settings.jira_status_in_progress,
             event_type=TimelineEventType.TICKET_MOVED_IN_PROGRESS,
         )
+
+        try:
+            remediation = await code_provider.create_remediation_pr(
+                incident_id=incident_id,
+                repository=thought_signature.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
+                target_file=thought_signature.target_file or "README.md",
+                action=thought_signature.recommended_action,
+                summary=thought_signature.root_cause,
+            )
+            if remediation.pr_number or remediation.pr_url:
+                append_timeline_event(state, TimelineEventType.PR_CREATED, agent="Mechanic")
+        except Exception as exc:
+            state["thought_signature"] = thought_signature
+            state["jira_ticket"] = jira_ticket
+            state["remediation_result"] = RemediationResult(
+                success=False,
+                action_taken=thought_signature.recommended_action,
+                pr_merged=False,
+                execution_time_seconds=0.0,
+                error_message=f"GitHub provider failure: {exc}",
+            ).model_dump()
+            state["ci_status"] = "pending"
+            state["codeowner_review_status"] = "pending"
+            integration_trace["provider_error"] = str(exc)
+            return state
+
+        gate_status = None
+        if remediation.pr_number and thought_signature.target_repository:
+            gate_status = await code_provider.get_merge_gate_status(
+                repository=thought_signature.target_repository,
+                pr_number=remediation.pr_number,
+            )
+
+        state["thought_signature"] = thought_signature
+        state["jira_ticket"] = jira_ticket
+        state["remediation_result"] = remediation.model_dump()
         if gate_status is not None:
             state["ci_status"] = "ci_passed" if gate_status.ci_passed else "pending"
             state["codeowner_review_status"] = "approved" if gate_status.codeowner_reviewed else "pending"
@@ -384,6 +389,8 @@ class MockRunner:
             if decision.eligible and isinstance(state["remediation_result"], dict):
                 state["remediation_result"]["pr_merged"] = True
                 state["resolved_at"] = datetime.now(timezone.utc).isoformat()
+                append_timeline_event(state, TimelineEventType.PR_MERGED, agent="Mechanic")
+                append_timeline_event(state, TimelineEventType.INCIDENT_RESOLVED, agent="System")
         return state
 
 
@@ -511,15 +518,27 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
             use_mock_providers=use_mock_providers,
             has_usable_api_key=usable_api_key,
         )
-        return await MockRunner().run(raw_alert, incident_id)
+        state = await MockRunner().run(raw_alert, incident_id)
+        trace = state.setdefault("integration_trace", {})
+        trace["execution_path"] = "mock_runner"
+        return state
 
     agent_instance = root_agent() if callable(root_agent) else root_agent
     try:
-        return await AdkRunner(agent_instance).run(raw_alert, incident_id)
+        state = await AdkRunner(agent_instance).run(raw_alert, incident_id)
+        trace = state.setdefault("integration_trace", {})
+        trace.setdefault("ticket_provider", "unknown")
+        trace.setdefault("code_provider", "unknown")
+        trace.setdefault("fallback_used", False)
+        trace["execution_path"] = "adk"
+        return state
     except Exception as exc:
         logger.warning(
             "ADK runner failed; falling back to mock runner for this incident",
             error=str(exc),
             incident_id=incident_id,
         )
-        return await MockRunner().run(raw_alert, incident_id)
+        state = await MockRunner().run(raw_alert, incident_id)
+        trace = state.setdefault("integration_trace", {})
+        trace["execution_path"] = "mock_runner"
+        return state

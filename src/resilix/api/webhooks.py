@@ -62,29 +62,6 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
     merged_state["timeline"] = initial_timeline + state_timeline
     merged_state.setdefault("approval", initial_state["approval"])
     merged_state.setdefault("ci_status", initial_state["ci_status"])
-
-    if merged_state.get("validated_alert"):
-        append_timeline_event(merged_state, TimelineEventType.ALERT_VALIDATED, agent="Sentinel")
-    if merged_state.get("thought_signature"):
-        append_timeline_event(merged_state, TimelineEventType.ROOT_CAUSE_IDENTIFIED, agent="Sherlock")
-    if merged_state.get("jira_ticket"):
-        append_timeline_event(merged_state, TimelineEventType.TICKET_CREATED, agent="Administrator")
-    remediation_result = merged_state.get("remediation_result", {})
-    has_pr = False
-    pr_merged = False
-    if isinstance(remediation_result, dict):
-        has_pr = bool(remediation_result.get("pr_number") or remediation_result.get("pr_url"))
-        pr_merged = bool(remediation_result.get("pr_merged"))
-    else:
-        has_pr = bool(getattr(remediation_result, "pr_number", None) or getattr(remediation_result, "pr_url", None))
-        pr_merged = bool(getattr(remediation_result, "pr_merged", False))
-    if has_pr:
-        append_timeline_event(merged_state, TimelineEventType.PR_CREATED, agent="Mechanic")
-        merged_state["ci_status"] = "ci_passed"
-    if pr_merged:
-        merged_state["resolved_at"] = datetime.now(timezone.utc).isoformat()
-        append_timeline_event(merged_state, TimelineEventType.PR_MERGED, agent="Mechanic")
-        append_timeline_event(merged_state, TimelineEventType.INCIDENT_RESOLVED, agent="System")
     await store.save(incident_id, merged_state)
 
     validated = merged_state.get("validated_alert")

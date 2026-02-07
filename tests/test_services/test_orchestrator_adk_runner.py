@@ -186,6 +186,7 @@ async def test_run_orchestrator_falls_back_to_mock_when_adk_run_raises(
     assert "validated_alert" in state
     assert "thought_signature" in state
     assert state["ci_status"] in ("pending", "ci_passed")
+    assert state.get("integration_trace", {}).get("execution_path") == "mock_runner"
 
 
 @pytest.mark.asyncio
@@ -216,6 +217,7 @@ async def test_run_orchestrator_uses_mock_for_placeholder_api_key_without_creati
     }
     state = await run_orchestrator(payload, "INC-PLACEHOLDER-001", root_agent=_raise_if_called)
     assert "validated_alert" in state
+    assert state.get("integration_trace", {}).get("execution_path") == "mock_runner"
 
 
 @pytest.mark.asyncio
