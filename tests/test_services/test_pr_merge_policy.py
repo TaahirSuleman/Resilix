@@ -7,9 +7,17 @@ from resilix.services.pr_merge_policy import (
 )
 
 
-def _state(*, ci_status: str = "ci_passed", approval_required: bool = True, approved: bool = False):
+def _state(
+    *,
+    ci_status: str = "ci_passed",
+    approval_required: bool = True,
+    approved: bool = False,
+    codeowner_review_status: str = "approved",
+):
     return {
         "ci_status": ci_status,
+        "codeowner_review_status": codeowner_review_status,
+        "policy": {"require_ci_pass": True, "require_codeowner_review": True, "merge_method": "squash"},
         "approval": {"required": approval_required, "approved": approved, "approved_at": None},
         "remediation_result": {
             "success": True,
@@ -32,6 +40,12 @@ def test_evaluate_merge_eligibility_requires_approval_when_configured() -> None:
     decision = evaluate_merge_eligibility(_state(approval_required=True, approved=False))
     assert decision.eligible is False
     assert decision.code == "approval_pending"
+
+
+def test_evaluate_approval_request_blocks_without_codeowner_review() -> None:
+    decision = evaluate_approval_request(_state(codeowner_review_status="pending"))
+    assert decision.eligible is False
+    assert decision.code == "codeowner_review_required"
 
 
 def test_apply_approval_and_merge_updates_state() -> None:

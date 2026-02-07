@@ -78,6 +78,26 @@ async def test_approve_merge_returns_409_when_pr_missing(test_client):
 
 
 @pytest.mark.asyncio
+async def test_approve_merge_returns_409_when_codeowner_review_missing(test_client):
+    response = await test_client.post("/webhook/prometheus", json=_payload())
+    incident_id = response.json()["incident_id"]
+
+    from resilix.services.session import get_session_store
+
+    store = get_session_store()
+    state = await store.get(incident_id)
+    assert state is not None
+    state["ci_status"] = "ci_passed"
+    state["codeowner_review_status"] = "pending"
+    state["thought_signature"] = {"target_repository": None}
+    await store.save(incident_id, state)
+
+    approve_response = await test_client.post(f"/incidents/{incident_id}/approve-merge")
+    assert approve_response.status_code == 409
+    assert approve_response.json()["detail"]["code"] == "codeowner_review_required"
+
+
+@pytest.mark.asyncio
 async def test_approve_merge_returns_404_for_missing_incident(test_client):
     approve_response = await test_client.post("/incidents/INC-DOESNOTEXIST/approve-merge")
     assert approve_response.status_code == 404
