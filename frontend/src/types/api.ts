@@ -90,3 +90,10 @@ export interface IncidentDetail extends IncidentSummary {
 export interface IncidentListResponse {
   items: IncidentSummary[]
 }
+
+export interface HealthResponse {
+  status: string
+  app_version?: string | null
+  build_sha?: string | null
+  frontend_served?: boolean
+}

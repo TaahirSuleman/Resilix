@@ -1,17 +1,29 @@
 # Build the frontend
 FROM node:20-slim AS frontend-build
 WORKDIR /app/frontend
+ARG VITE_APP_VERSION=dev
+ARG VITE_BUILD_SHA=local
+ARG VITE_BUILD_TIME=unknown
+ENV VITE_APP_VERSION=$VITE_APP_VERSION
+ENV VITE_BUILD_SHA=$VITE_BUILD_SHA
+ENV VITE_BUILD_TIME=$VITE_BUILD_TIME
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 COPY frontend/ .
 RUN npm run build
 
 # Use an official Python runtime as a parent image
 FROM python:3.12-slim
+ARG APP_VERSION=dev
+ARG BUILD_SHA=local
+ARG BUILD_TIME=unknown
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV APP_VERSION=$APP_VERSION
+ENV BUILD_SHA=$BUILD_SHA
+ENV BUILD_TIME=$BUILD_TIME
 
 # Set the working directory
 WORKDIR /app

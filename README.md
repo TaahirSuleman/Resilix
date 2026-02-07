@@ -42,8 +42,8 @@ Resilix uses a **multi-agent swarm** powered by Google ADK and Gemini 3:
 ## Integrations
 
 - **Prometheus/Alertmanager**: Alert ingestion via webhooks
-- **Atlassian MCP**: Jira ticket creation and management
-- **GitHub MCP**: Code operations (branch, commit, PR, merge)
+- **Jira REST API**: Ticket creation, transitions, and lifecycle updates
+- **GitHub REST API**: Branch, commit, PR, and merge operations
 - **Cloud Logging/ELK**: Log querying for investigation
 
 ## Local Setup
@@ -103,17 +103,25 @@ uvicorn resilix.main:app --reload --port 8080
 
 # Terminal 2: frontend
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 Production build served by FastAPI:
 ```bash
 cd frontend
-npm install
+npm ci
 npm run build
 
 uvicorn resilix.main:app --reload --port 8080
+```
+
+## Post-Deploy Smoke Check
+
+Run against Cloud Run:
+```bash
+export BASE_URL="https://<your-service>.run.app"
+./scripts/smoke_frontend_backend.sh
 ```
 
 ## Run via ADK Runner (Direct)

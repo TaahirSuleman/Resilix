@@ -3,9 +3,10 @@ import { Activity, Server, Zap, AlertTriangle, Shield } from 'lucide-react'
 
 interface SystemHealthStripProps {
   activeIncidents: number
+  buildLabel?: string
 }
 
-export function SystemHealthStrip({ activeIncidents }: SystemHealthStripProps) {
+export function SystemHealthStrip({ activeIncidents, buildLabel }: SystemHealthStripProps) {
   return (
     <div className="h-12 border-b border-gray-200 bg-white flex items-center px-4 justify-between fixed top-0 left-0 right-0 z-10">
       <div className="flex items-center gap-2">
@@ -41,7 +42,9 @@ export function SystemHealthStrip({ activeIncidents }: SystemHealthStripProps) {
           status={activeIncidents > 0 ? 'critical' : 'good'}
         />
       </div>
-      <div className="w-20"></div>
+      <div className="w-40 text-right">
+        {buildLabel ? <span className="text-[10px] text-gray-400 tracking-wide">{buildLabel}</span> : null}
+      </div>
     </div>
   )
 }

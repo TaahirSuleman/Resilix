@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     cors_allowed_origins: str = "http://localhost:5173,http://localhost:3000"
+    app_version: Optional[str] = None
+    build_sha: Optional[str] = None
+    build_time: Optional[str] = None
+    frontend_dist_dir: Optional[str] = None
 
     def effective_use_mock_providers(self) -> bool:
         if os.getenv("USE_MOCK_PROVIDERS") is not None:

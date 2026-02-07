@@ -33,6 +33,9 @@ async def test_health_reports_canonical_mock_mode(monkeypatch: pytest.MonkeyPatc
             assert body["provider_mode"] == "mock"
             assert body["effective_use_mock_providers"] is True
             assert body["legacy_flag_in_use"] is False
+            assert "frontend_served" in body
+            assert "app_version" in body
+            assert "build_sha" in body
 
 
 @pytest.mark.asyncio
@@ -60,3 +63,6 @@ async def test_health_reports_legacy_flag_usage(monkeypatch: pytest.MonkeyPatch)
             assert body["provider_mode"] == "mock"
             assert body["effective_use_mock_providers"] is True
             assert body["legacy_flag_in_use"] is True
+            assert "frontend_served" in body
+            assert "app_version" in body
+            assert "build_sha" in body
