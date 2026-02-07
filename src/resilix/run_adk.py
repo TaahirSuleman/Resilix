@@ -20,8 +20,8 @@ def _load_payload(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _validate_env(settings) -> None:
-    if settings.use_mock_mcp:
-        raise RuntimeError("USE_MOCK_MCP must be false to run ADK directly")
+    if settings.effective_use_mock_providers():
+        raise RuntimeError("USE_MOCK_PROVIDERS must be false to run ADK directly")
     key = (settings.gemini_api_key or "").strip().lower()
     if not key or key in {"your_key", "your_api_key", "changeme", "replace_me", "replace-with-real-key"}:
         raise RuntimeError("GEMINI_API_KEY must be set for ADK runs")

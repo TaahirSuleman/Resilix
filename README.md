@@ -64,7 +64,7 @@ Environment:
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Required for real ADK runs | Set for non-mock |
-| `USE_MOCK_MCP` | Optional | `true` for mock pipeline |
+| `USE_MOCK_PROVIDERS` | Optional | `true` for local/mock providers |
 | `DATABASE_URL` | Optional | Enables Postgres-backed sessions |
 | `REQUIRE_PR_APPROVAL` | Optional | `true` keeps PR merges gated |
 | `REQUIRE_CI_PASS` | Optional | `true` requires CI before merge |
@@ -119,7 +119,7 @@ uvicorn resilix.main:app --reload --port 8080
 ## Run via ADK Runner (Direct)
 
 1. Set:
-- `USE_MOCK_MCP=false`
+- `USE_MOCK_PROVIDERS=false`
 - `GEMINI_API_KEY=...`
 
 2. Run:
@@ -127,10 +127,16 @@ uvicorn resilix.main:app --reload --port 8080
 python -m resilix.run_adk --alert-file ./alert.json
 ```
 
-## Mock vs Real ADK
+## Mock vs Real Providers
 
-- `USE_MOCK_MCP=true` runs the mock pipeline without external integrations.
-- `USE_MOCK_MCP=false` runs Google ADK and requires `GEMINI_API_KEY`.
+- `USE_MOCK_PROVIDERS=true` runs mock providers (no external Jira/GitHub calls).
+- `USE_MOCK_PROVIDERS=false` runs real provider integrations and requires valid credentials.
+- `USE_MOCK_MCP` is temporarily supported as a deprecated alias for backward compatibility.
+
+## Integration Mode
+
+- Resilix uses direct Jira/GitHub API providers in runtime integrations.
+- MCP server runtime is not required for the current deployment path.
 
 ## Docker
 
