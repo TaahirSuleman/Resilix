@@ -151,6 +151,7 @@ async def test_adk_runner_uses_database_session_service_when_database_set(monkey
     import resilix.config.settings as settings_module
 
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/resilix")
+    monkeypatch.setenv("ADK_SESSION_BACKEND", "database")
     monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     settings_module.get_settings.cache_clear()
@@ -175,6 +176,7 @@ async def test_adk_runner_falls_back_to_in_memory_when_database_service_fails(
     monkeypatch.setitem(sys.modules, "google.adk.sessions.database_session_service", failing_mod)
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/resilix")
+    monkeypatch.setenv("ADK_SESSION_BACKEND", "database")
     monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     settings_module.get_settings.cache_clear()
@@ -184,6 +186,27 @@ async def test_adk_runner_falls_back_to_in_memory_when_database_service_fails(
 
     assert result["incident_id"] == "INC-ADK-DB-FALLBACK-001"
     assert result["adk_processed"] is True
+
+
+@pytest.mark.asyncio
+async def test_adk_runner_defaults_to_in_memory_even_when_database_url_is_set(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_adk_modules(monkeypatch)
+
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/resilix")
+    monkeypatch.delenv("ADK_SESSION_BACKEND", raising=False)
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    runner = AdkRunner(root_agent=object())
+    result = await runner.run({"status": "firing"}, "INC-ADK-DEFAULT-INMEM-001")
+
+    assert result["incident_id"] == "INC-ADK-DEFAULT-INMEM-001"
+    assert result["adk_processed"] is True
+    trace = result.get("integration_trace", {})
+    assert trace.get("adk_session_backend") == "in_memory"
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from resilix.agents.adk_shim import ParallelAgent, SequentialAgent
+from resilix.agents.adk_shim import SequentialAgent
 from resilix.agents.administrator import build_administrator_agent
 from resilix.agents.mechanic import build_mechanic_agent
 from resilix.agents.sentinel import build_sentinel_agent
@@ -13,9 +13,9 @@ def build_root_agent():
     administrator_agent = build_administrator_agent()
     mechanic_agent = build_mechanic_agent()
 
-    remediation_swarm = ParallelAgent(
+    remediation_swarm = SequentialAgent(
         name="RemediationSwarm",
-        description="Executes remediation actions in parallel",
+        description="Executes remediation actions in deterministic order",
         sub_agents=[administrator_agent, mechanic_agent],
     )
 

@@ -34,3 +34,27 @@ class RemediationResult(BaseModel):
 
     execution_time_seconds: float
     error_message: Optional[str] = None
+
+
+class JiraTicketPayload(BaseModel):
+    """ADK-friendly primitive-only payload for Administrator output."""
+
+    ticket_key: str
+    ticket_url: str
+    summary: str
+    priority: str
+    status: str
+    created_at: str
+
+
+class RemediationResultPayload(BaseModel):
+    """ADK-friendly primitive-only payload for Mechanic output."""
+
+    success: bool
+    action_taken: str
+    branch_name: Optional[str] = None
+    pr_number: Optional[int] = None
+    pr_url: Optional[str] = None
+    pr_merged: bool = False
+    execution_time_seconds: float
+    error_message: Optional[str] = None

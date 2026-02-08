@@ -45,3 +45,24 @@ class ValidatedAlert(BaseModel):
     triggered_at: datetime = Field(description="When alert was triggered")
     enrichment: AlertEnrichment = Field(default_factory=AlertEnrichment)
     triage_reason: str = Field(description="Why this decision was made")
+
+
+class ValidatedAlertPayload(BaseModel):
+    """ADK-friendly primitive-only payload for Sentinel output."""
+
+    alert_id: str
+    is_actionable: bool
+    severity: str
+    service_name: str
+    error_type: str
+    error_rate: float
+    affected_endpoints: List[str] = Field(default_factory=list)
+    triggered_at: str
+    triage_reason: str
+    signal_error_rate_high: int = 0
+    signal_health_flapping: int = 0
+    signal_backlog_growth: int = 0
+    signal_dependency_timeout: int = 0
+    weighted_score: float = 0.0
+    used_llm_fallback: bool = False
+    deterministic_confidence: float = 0.0

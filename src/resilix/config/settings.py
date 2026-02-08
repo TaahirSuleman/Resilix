@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: Optional[str] = None
     gemini_model_flash: str = "gemini-3-flash-preview"
-    gemini_model_pro: str = "gemini-3-pro-preview"
 
     # Gemini thinking configuration
     sentinel_thinking_level: str = "low"
@@ -27,6 +26,9 @@ class Settings(BaseSettings):
 
     # Infrastructure
     database_url: Optional[str] = None
+    # ADK session backend: use in-memory by default for runtime stability.
+    # Set to "database" only if ADK DB session compatibility is explicitly required.
+    adk_session_backend: str = "in_memory"
 
     # Feature flags
     use_mock_providers: bool = True
@@ -85,15 +87,11 @@ class Settings(BaseSettings):
         normalized = model_name.strip()
         alias_map = {
             "gemini-3-flash": "gemini-3-flash-preview",
-            "gemini-3-pro": "gemini-3-pro-preview",
         }
         return alias_map.get(normalized, normalized)
 
     def resolved_gemini_model_flash(self) -> str:
         return self._normalize_gemini_model_name(self.gemini_model_flash)
-
-    def resolved_gemini_model_pro(self) -> str:
-        return self._normalize_gemini_model_name(self.gemini_model_pro)
 
 
 @lru_cache
