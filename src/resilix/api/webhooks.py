@@ -85,12 +85,17 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
     await store.save(incident_id, merged_state)
 
     validated = merged_state.get("validated_alert")
-    severity = getattr(validated, "severity", "unknown")
+    if isinstance(validated, dict):
+        severity = validated.get("severity", "unknown")
+        actionable = bool(validated.get("is_actionable", True))
+    else:
+        severity = getattr(validated, "severity", "unknown")
+        actionable = getattr(validated, "is_actionable", True)
     if hasattr(severity, "value"):
         severity = severity.value
     return {
         "status": "accepted",
         "incident_id": incident_id,
-        "actionable": getattr(validated, "is_actionable", True),
+        "actionable": actionable,
         "severity": severity,
     }

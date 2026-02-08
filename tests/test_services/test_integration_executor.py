@@ -6,6 +6,7 @@ import pytest
 
 from resilix.models.remediation import JiraTicketResult, RemediationResult, RecommendedAction
 from resilix.services.integrations.base import MergeGateStatus
+from resilix.services.integrations.mock_providers import MockCodeProvider, MockTicketProvider
 from resilix.services.orchestrator import apply_direct_integrations
 
 
@@ -163,3 +164,44 @@ async def test_apply_direct_integrations_overrides_targets(monkeypatch: pytest.M
     trace = result_state.get("integration_trace")
     assert trace is not None
     assert trace.get("post_processor") == "direct_integrations"
+
+
+@pytest.mark.asyncio
+async def test_apply_direct_integrations_does_not_noop_with_mock_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "resilix.services.orchestrator.get_ticket_provider",
+        lambda: (MockTicketProvider(), "jira_mock"),
+    )
+    monkeypatch.setattr(
+        "resilix.services.orchestrator.get_code_provider",
+        lambda: (MockCodeProvider(), "github_mock"),
+    )
+
+    payload = {
+        "status": "firing",
+        "alerts": [
+            {
+                "labels": {
+                    "alertname": "HighErrorRate",
+                    "service": "checkout-api",
+                    "severity": "critical",
+                },
+                "annotations": {"summary": "Checkout API error rate spike"},
+                "startsAt": "2026-02-08T12:00:00Z",
+            }
+        ],
+    }
+    result_state = await apply_direct_integrations(state={}, raw_alert=payload, incident_id="INC-MOCK-001")
+
+    assert result_state.get("validated_alert") is not None
+    assert result_state.get("thought_signature") is not None
+    assert result_state.get("jira_ticket") is not None
+    assert result_state.get("remediation_result") is not None
+    assert result_state.get("ci_status") == "ci_passed"
+    assert result_state.get("codeowner_review_status") == "approved"
+    trace = result_state.get("integration_trace") or {}
+    assert trace.get("ticket_provider") == "jira_mock"
+    assert trace.get("code_provider") == "github_mock"
+    assert trace.get("fallback_used") is True

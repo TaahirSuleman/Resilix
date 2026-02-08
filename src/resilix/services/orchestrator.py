@@ -527,8 +527,11 @@ async def apply_direct_integrations(
     settings = get_settings()
     ticket_provider, ticket_provider_name = get_ticket_provider()
     code_provider, code_provider_name = get_code_provider()
-    if ticket_provider_name.endswith("mock") and code_provider_name.endswith("mock"):
-        return state
+    trace = state.setdefault("integration_trace", {})
+    trace["ticket_provider"] = ticket_provider_name
+    trace["code_provider"] = code_provider_name
+    trace["fallback_used"] = ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock")
+    trace["post_processor"] = "direct_integrations"
 
     validated_alert = state.get("validated_alert")
     if isinstance(validated_alert, ValidatedAlert):
@@ -574,12 +577,6 @@ async def apply_direct_integrations(
     if override_target_file:
         signature_model = signature_model.model_copy(update={"target_file": str(override_target_file)})
     state["thought_signature"] = signature_model.model_dump()
-
-    trace = state.setdefault("integration_trace", {})
-    trace["ticket_provider"] = ticket_provider_name
-    trace["code_provider"] = code_provider_name
-    trace["fallback_used"] = ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock")
-    trace["post_processor"] = "direct_integrations"
 
     severity = validated_model.severity
     service_name = validated_model.service_name
