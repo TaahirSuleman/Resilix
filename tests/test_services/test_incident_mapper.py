@@ -117,3 +117,41 @@ def test_state_to_incident_detail_prefers_ingest_created_at_over_alert_triggered
     }
     detail = state_to_incident_detail("INC-777", state)
     assert detail.created_at.isoformat() == "2026-02-08T10:54:22.459485+00:00"
+
+
+def test_state_to_incident_detail_marks_failed_when_adk_unavailable() -> None:
+    state = {
+        "created_at": "2026-02-08T10:54:22.459485+00:00",
+        "integration_trace": {
+            "execution_path": "adk_unavailable",
+            "execution_reason": "adk_runtime_exception",
+        },
+        "remediation_result": {
+            "success": False,
+            "action_taken": "fix_code",
+            "pr_merged": False,
+            "execution_time_seconds": 0.0,
+            "error_message": "provider_not_ready",
+        },
+    }
+    detail = state_to_incident_detail("INC-888", state)
+    assert detail.status.value == "failed"
+    assert detail.pr_status.value == "not_created"
+    assert detail.approval_status.value == "not_required"
+
+
+def test_state_to_incident_detail_marks_failed_when_remediation_error_present() -> None:
+    state = {
+        "created_at": "2026-02-08T10:54:22.459485+00:00",
+        "remediation_result": {
+            "success": False,
+            "action_taken": "fix_code",
+            "pr_merged": False,
+            "execution_time_seconds": 0.0,
+            "error_message": "github_api_requested_but_mock_provider_resolved",
+        },
+    }
+    detail = state_to_incident_detail("INC-889", state)
+    assert detail.status.value == "failed"
+    assert detail.pr_status.value == "not_created"
+    assert detail.approval_status.value == "not_required"

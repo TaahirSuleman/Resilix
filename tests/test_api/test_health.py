@@ -45,6 +45,9 @@ async def test_health_reports_canonical_mock_mode(monkeypatch: pytest.MonkeyPatc
             assert "adk_mode" in body
             assert "adk_ready" in body
             assert "adk_last_error" in body
+            assert "provider_readiness" in body
+            assert "provider_contract_ok" in body
+            assert body["provider_contract_ok"] is True
 
 
 @pytest.mark.asyncio
@@ -84,3 +87,52 @@ async def test_health_reports_legacy_flag_usage(monkeypatch: pytest.MonkeyPatch)
             assert "adk_mode" in body
             assert "adk_ready" in body
             assert "adk_last_error" in body
+            assert "provider_readiness" in body
+            assert "provider_contract_ok" in body
+
+
+@pytest.mark.asyncio
+async def test_health_reports_provider_contract_not_ok_when_api_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import resilix.config.settings as settings_module
+    from resilix.api import health as health_module
+
+    env_overrides = {
+        "USE_MOCK_PROVIDERS": "false",
+        "GEMINI_API_KEY": "test-key",
+        "JIRA_INTEGRATION_MODE": "api",
+        "GITHUB_INTEGRATION_MODE": "api",
+    }
+    readiness = {
+        "jira": {
+            "ready": False,
+            "resolved_backend": "unavailable",
+            "reason": "missing_or_invalid_config",
+            "missing_fields": ["JIRA_API_TOKEN"],
+        },
+        "github": {
+            "ready": True,
+            "resolved_backend": "github_api",
+            "reason": "ok",
+            "missing_fields": [],
+        },
+    }
+    adk_status = {
+        "runner_policy": "adk_only",
+        "service_revision": "rev-1",
+        "service_service": "svc",
+        "adk_mode": "strict",
+        "adk_ready": True,
+        "adk_last_error": None,
+        "adk_session_backend": "in_memory",
+        "mock_fallback_allowed": False,
+    }
+    with patch.dict(os.environ, env_overrides, clear=False), patch(
+        "resilix.api.health.get_provider_readiness", return_value=readiness
+    ), patch("resilix.api.health.get_adk_runtime_status", return_value=adk_status):
+        settings_module.get_settings.cache_clear()
+        body = await health_module.health()
+        assert body["provider_contract_ok"] is False
+        assert body["provider_readiness"]["jira"]["ready"] is False
+        assert body["integration_backends"]["jira"] == "unavailable"

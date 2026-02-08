@@ -5,9 +5,14 @@ from typing import Any
 import pytest
 
 from resilix.models.remediation import RecommendedAction
+from resilix.services.integrations.base import ProviderConfigError
 from resilix.services.integrations.github_direct import GithubDirectProvider
 from resilix.services.integrations.jira_direct import JiraDirectProvider
-from resilix.services.integrations.router import get_code_provider, get_ticket_provider
+from resilix.services.integrations.router import (
+    get_code_provider,
+    get_provider_readiness,
+    get_ticket_provider,
+)
 
 
 class _FakeResponse:
@@ -163,7 +168,7 @@ async def test_github_direct_provider_normalizes_pr_and_merge_gate(monkeypatch: 
     assert gate.codeowner_reviewed is True
 
 
-def test_router_returns_mock_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_router_raises_in_api_mode_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     import resilix.config.settings as settings_module
 
     monkeypatch.setenv("JIRA_INTEGRATION_MODE", "api")
@@ -175,8 +180,45 @@ def test_router_returns_mock_without_credentials(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("GITHUB_OWNER", "PLACEHOLDER_OWNER")
     settings_module.get_settings.cache_clear()
 
+    with pytest.raises(ProviderConfigError, match="jira_missing_or_invalid_config"):
+        get_ticket_provider()
+    with pytest.raises(ProviderConfigError, match="github_missing_or_invalid_config"):
+        get_code_provider()
+
+
+def test_router_returns_mock_in_explicit_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "mock")
+    settings_module.get_settings.cache_clear()
+
     _, ticket_name = get_ticket_provider()
     _, code_name = get_code_provider()
 
     assert ticket_name == "jira_mock"
     assert code_name == "github_mock"
+
+
+def test_provider_readiness_reports_unready_api_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "api")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "api")
+    monkeypatch.setenv("JIRA_URL", "PLACEHOLDER_JIRA_URL")
+    monkeypatch.setenv("JIRA_USERNAME", "PLACEHOLDER_JIRA_USERNAME")
+    monkeypatch.setenv("JIRA_API_TOKEN", "PLACEHOLDER_JIRA_API_TOKEN")
+    monkeypatch.setenv("JIRA_PROJECT_KEY", "PLACEHOLDER_JIRA_PROJECT_KEY")
+    monkeypatch.setenv("GITHUB_TOKEN", "PLACEHOLDER_GITHUB_TOKEN")
+    monkeypatch.setenv("GITHUB_OWNER", "PLACEHOLDER_OWNER")
+    settings_module.get_settings.cache_clear()
+
+    readiness = get_provider_readiness()
+    assert readiness["jira"]["ready"] is False
+    assert readiness["jira"]["resolved_backend"] == "unavailable"
+    assert readiness["jira"]["reason"] == "missing_or_invalid_config"
+    assert "JIRA_URL" in readiness["jira"]["missing_fields"]
+    assert readiness["github"]["ready"] is False
+    assert readiness["github"]["resolved_backend"] == "unavailable"
+    assert readiness["github"]["reason"] == "missing_or_invalid_config"
+    assert "GITHUB_TOKEN" in readiness["github"]["missing_fields"]
