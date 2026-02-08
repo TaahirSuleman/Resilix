@@ -23,7 +23,7 @@ def build_sentinel_agent() -> LlmAgent:
     return build_llm_agent(
         LlmAgent,
         name="SentinelAgent",
-        model=settings.gemini_model_flash,
+        model=settings.resolved_gemini_model_flash(),
         description="Fast alert validation and noise filtering",
         instruction=SENTINEL_INSTRUCTION,
         tools=[],

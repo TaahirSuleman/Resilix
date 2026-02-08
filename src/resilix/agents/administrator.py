@@ -21,7 +21,7 @@ def build_administrator_agent() -> LlmAgent:
     return build_llm_agent(
         LlmAgent,
         name="AdministratorAgent",
-        model=settings.gemini_model_flash,
+        model=settings.resolved_gemini_model_flash(),
         description="Creates audit trail via Jira ticket management",
         instruction=ADMIN_INSTRUCTION,
         tools=[jira_create_issue],
