@@ -1,0 +1,49 @@
+{
+  "version": "4",
+  "groupKey": "dns-config-error",
+  "status": "firing",
+  "receiver": "resilix",
+  "repository": "PLACEHOLDER_OWNER/resilix",
+  "target_file": "infra/dns/coredns-config.yaml",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "DNSResolverFlapping",
+        "service": "dns-resolver",
+        "severity": "critical"
+      },
+      "annotations": {
+        "summary": "DNS resolver targets are flapping",
+        "description": "Targets alternating between healthy and unhealthy"
+      },
+      "startsAt": "2026-02-05T10:30:00Z"
+    }
+  ],
+  "log_entries": [
+    {
+      "timestamp": "2026-02-05T10:30:01Z",
+      "level": "ERROR",
+      "service": "dns-resolver",
+      "component": "HealthCheckSubsystem",
+      "event": "TargetHealthFlapping",
+      "message": "Targets alternating between healthy and unhealthy due to propagation backlog",
+      "metadata": {
+        "queue_depth": 230061,
+        "unhealthy_targets_count": 480
+      }
+    },
+    {
+      "timestamp": "2026-02-05T10:30:10Z",
+      "level": "ERROR",
+      "service": "dns-resolver",
+      "component": "HealthCheckSubsystem",
+      "event": "TargetHealthFlapping",
+      "message": "Propagation backlog is growing and health state is unstable",
+      "metadata": {
+        "queue_depth": 330234,
+        "unhealthy_targets_count": 583
+      }
+    }
+  ]
+}
