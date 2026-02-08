@@ -57,6 +57,25 @@ class _Runner:
         yield {"event": "done", "message": new_message}
 
 
+class _RunnerSessionNotFoundOnce(_Runner):
+    def __init__(self, *, app_name: str, agent, session_service):
+        super().__init__(app_name=app_name, agent=agent, session_service=session_service)
+        self._raised_once = False
+
+    async def run_async(self, *, user_id: str, session_id: str, new_message):
+        if not self._raised_once:
+            self._raised_once = True
+            raise RuntimeError(f"Session not found: {session_id}")
+        async for event in super().run_async(user_id=user_id, session_id=session_id, new_message=new_message):
+            yield event
+
+
+class _RunnerSessionNotFoundAlways(_Runner):
+    async def run_async(self, *, user_id: str, session_id: str, new_message):
+        raise RuntimeError(f"Session not found: {session_id}")
+        yield  # pragma: no cover
+
+
 class _Part:
     @staticmethod
     def from_text(*, text: str):
@@ -69,15 +88,33 @@ class _Content:
         self.parts = parts
 
 
-def _install_fake_adk_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+class _FlakyCreateSessionService(_BaseSessionService):
+    def __init__(self) -> None:
+        super().__init__()
+        self._failed = False
+
+    async def create_session(self, *, app_name: str, user_id: str, session_id: str, state: dict):
+        if not self._failed:
+            self._failed = True
+            raise RuntimeError("transient create failure")
+        await super().create_session(app_name=app_name, user_id=user_id, session_id=session_id, state=state)
+
+
+def _install_fake_adk_modules(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    runner_cls: type = _Runner,
+    in_memory_cls: type = _InMemorySessionService,
+    database_cls: type = _DatabaseSessionService,
+) -> None:
     runners_mod = ModuleType("google.adk.runners")
-    runners_mod.Runner = _Runner
+    runners_mod.Runner = runner_cls
 
     sessions_mod = ModuleType("google.adk.sessions")
-    sessions_mod.InMemorySessionService = _InMemorySessionService
+    sessions_mod.InMemorySessionService = in_memory_cls
 
     db_sessions_mod = ModuleType("google.adk.sessions.database_session_service")
-    db_sessions_mod.DatabaseSessionService = _DatabaseSessionService
+    db_sessions_mod.DatabaseSessionService = database_cls
 
     genai_mod = ModuleType("google.genai")
     genai_mod.types = SimpleNamespace(Content=_Content, Part=_Part)
@@ -321,3 +358,58 @@ async def test_run_orchestrator_always_sets_trace_invariants(monkeypatch: pytest
     assert isinstance(trace.get("execution_reason"), str)
     assert bool(trace.get("execution_reason"))
     assert trace.get("runner_policy") == "adk_only"
+
+
+@pytest.mark.asyncio
+async def test_adk_runner_recovers_when_session_missing_once(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_adk_modules(monkeypatch, runner_cls=_RunnerSessionNotFoundOnce)
+
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    runner = AdkRunner(root_agent=object())
+    result = await runner.run({"status": "firing"}, "INC-ADK-RECOVER-001")
+
+    assert result["incident_id"] == "INC-ADK-RECOVER-001"
+    trace = result.get("integration_trace", {})
+    assert trace.get("adk_session_recovered") is True
+    assert trace.get("adk_session_backend") in {"in_memory", "database", "in_memory_recovery"}
+
+
+@pytest.mark.asyncio
+async def test_adk_runner_retries_create_session_transient_failure(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_adk_modules(monkeypatch, in_memory_cls=_FlakyCreateSessionService)
+
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    runner = AdkRunner(root_agent=object())
+    result = await runner.run({"status": "firing"}, "INC-ADK-CREATE-RETRY-001")
+
+    assert result["incident_id"] == "INC-ADK-CREATE-RETRY-001"
+    assert result["adk_processed"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_marks_unavailable_when_session_unrecoverable(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_adk_modules(monkeypatch, runner_cls=_RunnerSessionNotFoundAlways)
+
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "")
+    settings_module.get_settings.cache_clear()
+
+    state = await run_orchestrator({"status": "firing", "alerts": []}, "INC-ADK-UNRECOVERABLE-001", root_agent=object())
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_unavailable"
+    assert trace.get("execution_reason") == "adk_runtime_exception"

@@ -481,6 +481,15 @@ class AdkRunner:
     def __init__(self, root_agent: Any) -> None:
         self._root_agent = root_agent
 
+    @staticmethod
+    def _is_session_not_found_error(exc: Exception) -> bool:
+        return "session not found" in str(exc).lower()
+
+    @staticmethod
+    def _is_session_exists_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "already exists" in message or "duplicate" in message or "unique" in message
+
     async def run(self, raw_alert: Dict[str, Any], incident_id: str) -> Dict[str, Any]:
         try:
             from google.adk.runners import Runner
@@ -494,10 +503,124 @@ class AdkRunner:
 
         settings = get_settings()
 
+        user_id = "resilix-bot"
+        session_id = incident_id
+        app_name = "resilix"
+        message = types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=f"Process incident alert: {raw_alert}")],
+        )
+
+        async def _ensure_session(session_service: Any) -> None:
+            """Create or validate an ADK session. Never swallow missing-session failures."""
+            create_error: Exception | None = None
+            try:
+                await session_service.create_session(
+                    app_name=app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                    state={"raw_alert": raw_alert, "incident_id": incident_id},
+                )
+            except Exception as exc:
+                create_error = exc
+                if not self._is_session_exists_error(exc):
+                    logger.warning(
+                        "ADK session create failed; validating existence",
+                        incident_id=incident_id,
+                        error=str(exc),
+                    )
+
+            try:
+                existing = await session_service.get_session(
+                    app_name=app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+            except Exception as exc:
+                raise RuntimeError(f"adk_session_lookup_failed: {exc}") from exc
+            if existing is not None:
+                return
+
+            # One explicit retry path for transient create/propagation issues.
+            try:
+                await session_service.create_session(
+                    app_name=app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                    state={"raw_alert": raw_alert, "incident_id": incident_id},
+                )
+            except Exception as exc:
+                if not self._is_session_exists_error(exc):
+                    logger.warning(
+                        "ADK session create retry failed",
+                        incident_id=incident_id,
+                        error=str(exc),
+                    )
+                elif create_error is None:
+                    create_error = exc
+
+            existing = await session_service.get_session(
+                app_name=app_name,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if existing is None:
+                base = str(create_error) if create_error else "session_create_no_effect"
+                raise RuntimeError(f"adk_session_unavailable: {base}")
+
+        async def _run_with_service(session_service: Any, backend_label: str) -> Dict[str, Any]:
+            runner = Runner(
+                app_name=app_name,
+                agent=self._root_agent,
+                session_service=session_service,
+            )
+            await _ensure_session(session_service)
+
+            recovered = False
+            try:
+                async for _event in runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=message,
+                ):
+                    pass
+            except Exception as exc:
+                if not self._is_session_not_found_error(exc):
+                    raise
+                logger.warning(
+                    "ADK run failed with missing session; recreating and retrying once",
+                    incident_id=incident_id,
+                    backend=backend_label,
+                    error=str(exc),
+                )
+                recovered = True
+                await _ensure_session(session_service)
+                async for _event in runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=message,
+                ):
+                    pass
+
+            session = await session_service.get_session(
+                app_name=app_name,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if session is None:
+                raise RuntimeError(f"Session not found: {session_id}")
+            state = session.state if session.state else {"raw_alert": raw_alert}
+            trace = state.setdefault("integration_trace", {})
+            trace["adk_session_backend"] = backend_label
+            trace["adk_session_recovered"] = recovered
+            return state
+
+        session_backend = "in_memory"
         if settings.database_url:
             db_url = self._normalize_database_url_for_adk(settings.database_url)
             try:
                 session_service = DatabaseSessionService(db_url)
+                session_backend = "database"
             except Exception as exc:
                 logger.warning(
                     "ADK database session service init failed; falling back to in-memory",
@@ -507,70 +630,21 @@ class AdkRunner:
         else:
             session_service = InMemorySessionService()
 
-        runner = Runner(
-            app_name="resilix",
-            agent=self._root_agent,
-            session_service=session_service,
-        )
-
-        user_id = "resilix-bot"
-        session_id = incident_id
-
         try:
-            await session_service.create_session(
-                app_name="resilix",
-                user_id=user_id,
-                session_id=session_id,
-                state={"raw_alert": raw_alert, "incident_id": incident_id},
-            )
-        except Exception:
-            # Session may already exist; ignore for now
-            pass
-
-        message = types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=f"Process incident alert: {raw_alert}")],
-        )
-
-        try:
-            async for _event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=message,
-            ):
-                # Consume events until completion
-                pass
-            session = await session_service.get_session(
-                app_name="resilix", user_id=user_id, session_id=session_id
-            )
-        except TypeError as exc:
-            # Some DB URLs contain query params unsupported by ADK's database session backend.
+            return await _run_with_service(session_service, session_backend)
+        except Exception as exc:
+            if session_backend != "database":
+                raise
             logger.warning(
-                "ADK session service failed at runtime; retrying with in-memory session",
+                "ADK database session backend failed at runtime; retrying incident with in-memory ADK session",
+                incident_id=incident_id,
                 error=str(exc),
             )
-            in_memory_service = InMemorySessionService()
-            runner = Runner(
-                app_name="resilix",
-                agent=self._root_agent,
-                session_service=in_memory_service,
-            )
-            await in_memory_service.create_session(
-                app_name="resilix",
-                user_id=user_id,
-                session_id=session_id,
-                state={"raw_alert": raw_alert, "incident_id": incident_id},
-            )
-            async for _event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=message,
-            ):
-                pass
-            session = await in_memory_service.get_session(
-                app_name="resilix", user_id=user_id, session_id=session_id
-            )
-        return session.state if session else {"raw_alert": raw_alert}
+            recovery_service = InMemorySessionService()
+            state = await _run_with_service(recovery_service, "in_memory_recovery")
+            trace = state.setdefault("integration_trace", {})
+            trace["adk_session_backend_primary"] = "database"
+            return state
 
     @staticmethod
     def _normalize_database_url_for_adk(db_url: str) -> str:
