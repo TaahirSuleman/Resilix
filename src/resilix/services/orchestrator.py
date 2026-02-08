@@ -156,6 +156,11 @@ def _finalize_execution_trace(
         trace.pop("adk_error", None)
 
 
+def _is_missing_tool_error(error_message: str) -> bool:
+    lowered = (error_message or "").lower()
+    return "tool '" in lowered and "not found" in lowered
+
+
 def _build_adk_unavailable_state(
     *,
     raw_alert: Dict[str, Any],
@@ -1220,12 +1225,35 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
     except Exception as exc:
         error = " | ".join(_flatten_exception_messages(exc)) or str(exc)
         _set_adk_last_error(error)
+        if _is_missing_tool_error(error):
+            try:
+                recovered_state = await apply_direct_integrations(
+                    state={},
+                    raw_alert=raw_alert,
+                    incident_id=incident_id,
+                )
+                _finalize_execution_trace(
+                    recovered_state,
+                    path="adk_recovered",
+                    reason="adk_missing_tool_recovered",
+                    adk_error=error,
+                )
+                logger.warning(
+                    "ADK execution failed on missing tool; recovered via deterministic integrations",
+                    incident_id=incident_id,
+                    error=error,
+                )
+                return recovered_state
+            except Exception as recovery_exc:
+                logger.error(
+                    "ADK missing-tool recovery failed",
+                    incident_id=incident_id,
+                    error=error,
+                    recovery_error=str(recovery_exc),
+                )
+
         reason = "adk_runtime_exception"
-        logger.error(
-            "ADK-only runner policy: orchestration failed",
-            error=error,
-            incident_id=incident_id,
-        )
+        logger.error("ADK-only runner policy: orchestration failed", error=error, incident_id=incident_id)
         return _build_adk_unavailable_state(
             raw_alert=raw_alert,
             incident_id=incident_id,

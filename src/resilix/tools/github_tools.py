@@ -91,3 +91,71 @@ def github_merge_pr(repo: str, pr_number: int) -> Dict[str, bool]:
     except Exception:  # pragma: no cover
         pass
     return {"merged": True}
+
+
+@tool
+def list_commits(repository: str, limit: int = 5) -> Dict[str, Any]:
+    """List recent commits for a repository.
+
+    This is a safe compatibility tool for LLM planning in Sherlock.
+    It should never raise and returns an empty list if GitHub is unavailable.
+    """
+    try:
+        from resilix.config import get_settings
+
+        settings = get_settings()
+        token = (settings.github_token or "").strip()
+        repo_text = (repository or "").strip()
+        if not repo_text:
+            return {"repository": repository, "count": 0, "commits": [], "error": "missing_repository"}
+
+        if "/" in repo_text:
+            owner, repo = repo_text.split("/", 1)
+        else:
+            owner = (settings.github_owner or "").strip()
+            repo = repo_text
+
+        if not token or not owner or not repo:
+            return {"repository": f"{owner}/{repo}".strip("/"), "count": 0, "commits": [], "error": "github_not_configured"}
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/commits",
+                headers=headers,
+                params={"per_page": max(1, min(int(limit), 20))},
+            )
+
+        if response.status_code >= 400:
+            return {
+                "repository": f"{owner}/{repo}",
+                "count": 0,
+                "commits": [],
+                "error": f"github_http_{response.status_code}",
+            }
+
+        payload = response.json()
+        commits: list[dict[str, str]] = []
+        if isinstance(payload, list):
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                sha = str(item.get("sha") or "")
+                message = str((item.get("commit") or {}).get("message") or "")
+                html_url = str(item.get("html_url") or "")
+                if not sha:
+                    continue
+                commits.append(
+                    {
+                        "sha": sha,
+                        "message": message,
+                        "url": html_url,
+                    }
+                )
+        return {"repository": f"{owner}/{repo}", "count": len(commits), "commits": commits, "error": None}
+    except Exception as exc:  # pragma: no cover
+        return {"repository": repository, "count": 0, "commits": [], "error": str(exc)}
