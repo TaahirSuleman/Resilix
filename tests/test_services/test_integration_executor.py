@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+
+from resilix.models.remediation import JiraTicketResult, RemediationResult, RecommendedAction
+from resilix.services.integrations.base import MergeGateStatus
+from resilix.services.orchestrator import apply_direct_integrations
+
+
+class FakeTicketProvider:
+    def __init__(self) -> None:
+        self.created = []
+        self.transitions = []
+
+    async def create_incident_ticket(
+        self,
+        *,
+        incident_id: str,
+        summary: str,
+        description: str,
+        priority: str,
+    ) -> JiraTicketResult:
+        self.created.append(
+            {
+                "incident_id": incident_id,
+                "summary": summary,
+                "description": description,
+                "priority": priority,
+            }
+        )
+        return JiraTicketResult(
+            ticket_key="SRE-00001",
+            ticket_url="https://example.atlassian.net/browse/SRE-00001",
+            summary=summary,
+            priority=priority,
+            status="Open",
+            created_at=datetime.now(timezone.utc),
+        )
+
+    async def transition_ticket(self, *, ticket_key: str, target_status: str) -> dict[str, object]:
+        result = {
+            "ok": True,
+            "from_status": None,
+            "to_status": target_status,
+            "applied_transition_id": "test-transition",
+            "reason": None,
+        }
+        self.transitions.append(result)
+        return result
+
+
+class FakeCodeProvider:
+    def __init__(self) -> None:
+        self.created = []
+
+    async def create_remediation_pr(
+        self,
+        *,
+        incident_id: str,
+        repository: str,
+        target_file: str,
+        action: RecommendedAction,
+        summary: str,
+    ) -> RemediationResult:
+        self.created.append(
+            {
+                "incident_id": incident_id,
+                "repository": repository,
+                "target_file": target_file,
+                "action": action,
+                "summary": summary,
+            }
+        )
+        return RemediationResult(
+            success=True,
+            action_taken=action,
+            branch_name=f"fix/{incident_id.lower()}",
+            pr_number=123,
+            pr_url=f"https://github.com/{repository}/pull/123",
+            pr_merged=False,
+            execution_time_seconds=0.5,
+        )
+
+    async def get_merge_gate_status(self, *, repository: str, pr_number: int) -> MergeGateStatus:
+        return MergeGateStatus(
+            ci_passed=True,
+            codeowner_reviewed=True,
+            details={"repository": repository, "pr_number": pr_number},
+        )
+
+
+@pytest.mark.asyncio
+async def test_apply_direct_integrations_overrides_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    ticket_provider = FakeTicketProvider()
+    code_provider = FakeCodeProvider()
+
+    monkeypatch.setattr(
+        "resilix.services.orchestrator.get_ticket_provider",
+        lambda: (ticket_provider, "jira_api"),
+    )
+    monkeypatch.setattr(
+        "resilix.services.orchestrator.get_code_provider",
+        lambda: (code_provider, "github_api"),
+    )
+
+    payload = {
+        "version": "4",
+        "groupKey": "dns-config-error",
+        "status": "firing",
+        "receiver": "resilix",
+        "repository": "acme/resilix-demo-config",
+        "target_file": "infra/dns/coredns-config.yaml",
+        "alerts": [
+            {
+                "status": "firing",
+                "labels": {
+                    "alertname": "DNSResolverFlapping",
+                    "service": "dns-resolver",
+                    "severity": "critical",
+                },
+                "annotations": {"summary": "DNS flapping"},
+                "startsAt": "2026-02-05T10:30:00Z",
+            }
+        ],
+        "log_entries": [
+            {
+                "timestamp": "2026-02-05T10:30:01Z",
+                "level": "ERROR",
+                "service": "dns-resolver",
+                "component": "HealthCheckSubsystem",
+                "event": "TargetHealthFlapping",
+                "message": "Targets alternating between healthy and unhealthy due to backlog",
+                "metadata": {"queue_depth": 230061, "unhealthy_targets_count": 480},
+            }
+        ],
+    }
+
+    state: dict[str, object] = {}
+    result_state = await apply_direct_integrations(
+        state=state,
+        raw_alert=payload,
+        incident_id="INC-TEST001",
+    )
+
+    signature = result_state["thought_signature"]
+    assert signature["target_repository"] == "acme/resilix-demo-config"
+    assert signature["target_file"] == "infra/dns/coredns-config.yaml"
+
+    assert result_state["jira_ticket"]["ticket_key"] == "SRE-00001"
+    assert result_state["remediation_result"]["pr_number"] == 123
+    assert result_state["ci_status"] == "ci_passed"
+    assert result_state["codeowner_review_status"] == "approved"
+
+    timeline_types = [event["event_type"] for event in result_state.get("timeline", [])]
+    assert "ticket_created" in timeline_types
+    assert "ticket_moved_todo" in timeline_types
+    assert "ticket_moved_in_progress" in timeline_types
+    assert "ticket_moved_in_review" in timeline_types
+    assert "pr_created" in timeline_types
+
+    trace = result_state.get("integration_trace")
+    assert trace is not None
+    assert trace.get("post_processor") == "direct_integrations"

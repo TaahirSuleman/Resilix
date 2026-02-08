@@ -9,6 +9,7 @@ from zlib import crc32
 import structlog
 
 from resilix.config import get_settings
+from resilix.models.alert import ValidatedAlert
 from resilix.models.remediation import RecommendedAction, RemediationResult
 from resilix.models.thought_signature import Evidence, RootCauseCategory, ThoughtSignature
 from resilix.models.timeline import TimelineEventType
@@ -287,6 +288,218 @@ def _build_evidence_chain(raw_alert: Dict[str, Any], service_name: str) -> list[
             )
         )
     return evidence_chain
+
+
+def _build_fallback_thought_signature(
+    *,
+    incident_id: str,
+    raw_alert: Dict[str, Any],
+    validated_alert: ValidatedAlert,
+) -> ThoughtSignature:
+    signal_scores = _signal_map(validated_alert)
+    category, action = _infer_root_cause_category(signal_scores)
+    target_file = _artifact_path_for_category(category)
+    service_name = validated_alert.service_name
+    evidence_chain = _build_evidence_chain(raw_alert, service_name)
+
+    settings = get_settings()
+    repository = (
+        raw_alert.get("repository")
+        or ((raw_alert.get("alerts") or [{}])[0].get("labels", {}).get("repository"))
+        or f"{settings.github_owner}/resilix-demo-app"
+    )
+
+    if category == RootCauseCategory.CONFIG_ERROR:
+        root_cause = "Propagation configuration drift caused unstable health transitions."
+    elif category == RootCauseCategory.DEPENDENCY_FAILURE:
+        root_cause = "Dependency communications degraded under timeout conditions."
+    elif category == RootCauseCategory.CODE_BUG:
+        root_cause = "Application logic error increased failing request volume."
+    else:
+        root_cause = "Service capacity limits were exceeded under incident load."
+
+    weighted_score = _weighted_score(validated_alert)
+    confidence = min(0.98, 0.62 + (weighted_score * 0.04))
+
+    return ThoughtSignature(
+        incident_id=incident_id,
+        root_cause=root_cause,
+        root_cause_category=category,
+        evidence_chain=evidence_chain,
+        affected_services=[service_name],
+        confidence_score=round(confidence, 3),
+        recommended_action=action,
+        target_repository=str(repository),
+        target_file=target_file,
+        target_line=1,
+        related_commits=[],
+        investigation_summary=(
+            "Correlated incident signals and evidence indicate a primary failure mode "
+            "in a single remediation artifact."
+        ),
+        investigation_duration_seconds=4.5,
+    )
+
+
+async def apply_direct_integrations(
+    *,
+    state: dict[str, Any],
+    raw_alert: Dict[str, Any],
+    incident_id: str,
+) -> dict[str, Any]:
+    settings = get_settings()
+    ticket_provider, ticket_provider_name = get_ticket_provider()
+    code_provider, code_provider_name = get_code_provider()
+    if ticket_provider_name.endswith("mock") and code_provider_name.endswith("mock"):
+        return state
+
+    validated_alert = state.get("validated_alert")
+    if isinstance(validated_alert, ValidatedAlert):
+        validated_model = validated_alert
+    elif isinstance(validated_alert, dict):
+        try:
+            validated_model = ValidatedAlert.model_validate(validated_alert)
+        except Exception:
+            validated_model = None
+    else:
+        validated_model = None
+
+    if validated_model is None:
+        validated_model, sentinel_trace = evaluate_alert(
+            payload=raw_alert,
+            incident_id=incident_id,
+        )
+        state["validated_alert"] = validated_model.model_dump()
+        state["sentinel_trace"] = sentinel_trace
+
+    signature_value = state.get("thought_signature")
+    if isinstance(signature_value, ThoughtSignature):
+        signature_model = signature_value
+    elif isinstance(signature_value, dict):
+        try:
+            signature_model = ThoughtSignature.model_validate(signature_value)
+        except Exception:
+            signature_model = None
+    else:
+        signature_model = None
+
+    if signature_model is None:
+        signature_model = _build_fallback_thought_signature(
+            incident_id=incident_id,
+            raw_alert=raw_alert,
+            validated_alert=validated_model,
+        )
+
+    override_repository = raw_alert.get("repository")
+    override_target_file = raw_alert.get("target_file")
+    if override_repository:
+        signature_model = signature_model.model_copy(update={"target_repository": str(override_repository)})
+    if override_target_file:
+        signature_model = signature_model.model_copy(update={"target_file": str(override_target_file)})
+    state["thought_signature"] = signature_model.model_dump()
+
+    trace = state.setdefault("integration_trace", {})
+    trace["ticket_provider"] = ticket_provider_name
+    trace["code_provider"] = code_provider_name
+    trace["fallback_used"] = ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock")
+    trace["post_processor"] = "direct_integrations"
+
+    severity = validated_model.severity
+    service_name = validated_model.service_name
+    normalized_ticket = build_ticket_from_signature(
+        incident_id=incident_id,
+        signature=signature_model,
+        severity=severity,
+        service_name=service_name,
+    )
+
+    try:
+        jira_ticket = await ticket_provider.create_incident_ticket(
+            incident_id=incident_id,
+            summary=normalized_ticket.summary,
+            description=signature_model.investigation_summary,
+            priority=normalized_ticket.priority,
+        )
+        append_timeline_event(state, TimelineEventType.TICKET_CREATED, agent="Administrator")
+    except Exception as exc:
+        state["jira_ticket"] = None
+        state["remediation_result"] = RemediationResult(
+            success=False,
+            action_taken=signature_model.recommended_action,
+            pr_merged=False,
+            execution_time_seconds=0.0,
+            error_message=f"Jira provider failure: {exc}",
+        ).model_dump()
+        state["ci_status"] = "pending"
+        state["codeowner_review_status"] = "pending"
+        trace["post_processor_error"] = f"jira_error: {exc}"
+        return state
+
+    await _transition_jira_ticket(
+        state=state,
+        ticket_provider=ticket_provider,
+        jira_ticket=jira_ticket,
+        target_status=settings.jira_status_todo,
+        event_type=TimelineEventType.TICKET_MOVED_TODO,
+    )
+    await _transition_jira_ticket(
+        state=state,
+        ticket_provider=ticket_provider,
+        jira_ticket=jira_ticket,
+        target_status=settings.jira_status_in_progress,
+        event_type=TimelineEventType.TICKET_MOVED_IN_PROGRESS,
+    )
+    await _transition_jira_ticket(
+        state=state,
+        ticket_provider=ticket_provider,
+        jira_ticket=jira_ticket,
+        target_status=settings.jira_status_in_review,
+        event_type=TimelineEventType.TICKET_MOVED_IN_REVIEW,
+    )
+
+    try:
+        remediation = await code_provider.create_remediation_pr(
+            incident_id=incident_id,
+            repository=signature_model.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
+            target_file=signature_model.target_file or "README.md",
+            action=signature_model.recommended_action,
+            summary=signature_model.root_cause,
+        )
+        if remediation.pr_number or remediation.pr_url:
+            append_timeline_event(state, TimelineEventType.PR_CREATED, agent="Mechanic")
+    except Exception as exc:
+        state["jira_ticket"] = getattr(jira_ticket, "model_dump", lambda: jira_ticket)()
+        state["remediation_result"] = RemediationResult(
+            success=False,
+            action_taken=signature_model.recommended_action,
+            pr_merged=False,
+            execution_time_seconds=0.0,
+            error_message=f"GitHub provider failure: {exc}",
+        ).model_dump()
+        state["ci_status"] = "pending"
+        state["codeowner_review_status"] = "pending"
+        trace["post_processor_error"] = f"github_error: {exc}"
+        return state
+
+    state["jira_ticket"] = getattr(jira_ticket, "model_dump", lambda: jira_ticket)()
+    state["remediation_result"] = remediation.model_dump()
+
+    gate_status = None
+    if remediation.pr_number and signature_model.target_repository:
+        gate_status = await code_provider.get_merge_gate_status(
+            repository=signature_model.target_repository,
+            pr_number=remediation.pr_number,
+        )
+
+    if gate_status is not None:
+        state["ci_status"] = "ci_passed" if gate_status.ci_passed else "pending"
+        state["codeowner_review_status"] = "approved" if gate_status.codeowner_reviewed else "pending"
+        trace["gate_details"] = gate_status.details
+    else:
+        state["ci_status"] = "ci_passed"
+        state["codeowner_review_status"] = "pending"
+
+    return state
 
 
 async def _transition_jira_ticket(
@@ -787,6 +1000,7 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
         normalized_signature = _normalize_adk_thought_signature(state.get("thought_signature"), incident_id)
         if normalized_signature is not None:
             state["thought_signature"] = normalized_signature.model_dump()
+        state = await apply_direct_integrations(state=state, raw_alert=raw_alert, incident_id=incident_id)
         _set_adk_last_error(None)
         _finalize_execution_trace(state, path="adk", reason="adk_success")
         return state

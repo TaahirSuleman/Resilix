@@ -179,6 +179,31 @@ docker-compose -f docker-compose.demo.yml up
 docker-compose logs -f resilix
 ```
 
+## Simulator (DNS Demo)
+
+Run the webhook-only DNS misconfiguration simulator against a running Resilix API.
+
+Required env vars for real integrations:
+- `GEMINI_API_KEY`
+- `GITHUB_TOKEN`
+- `GITHUB_OWNER`
+- `JIRA_URL`
+- `JIRA_USERNAME`
+- `JIRA_API_TOKEN`
+- `JIRA_PROJECT_KEY`
+
+Optional env vars:
+- `RESILIX_BASE_URL`
+- `RESILIX_TARGET_REPOSITORY`
+- `RESILIX_TARGET_FILE`
+
+Example:
+```bash
+python simulator/scripts/run_dns_demo.py --base-url http://localhost:8080
+```
+
+By default, the simulator targets `${GITHUB_OWNER}/resilix`. Override with `RESILIX_TARGET_REPOSITORY` or `--repository` if needed.
+
 ## Project Structure
 
 ```
