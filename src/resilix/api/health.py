@@ -38,6 +38,7 @@ async def health() -> dict:
         "adk_mode": adk_status["adk_mode"],
         "adk_ready": adk_status["adk_ready"],
         "adk_last_error": adk_status["adk_last_error"],
+        "adk_session_backend": adk_status["adk_session_backend"],
         "mock_fallback_allowed": adk_status["mock_fallback_allowed"],
         "integration_backends": {
             "jira": ticket_provider,

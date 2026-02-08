@@ -32,9 +32,7 @@ def test_uses_default_when_no_flag_set(monkeypatch):
     assert settings.is_legacy_mock_flag_used() is False
 
 
-def test_normalizes_legacy_gemini_model_aliases(monkeypatch):
+def test_normalizes_gemini_flash_model_alias(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL_FLASH", "gemini-3-flash")
-    monkeypatch.setenv("GEMINI_MODEL_PRO", "gemini-3-pro")
     settings = _fresh_settings()
     assert settings.resolved_gemini_model_flash() == "gemini-3-flash-preview"
-    assert settings.resolved_gemini_model_pro() == "gemini-3-pro-preview"

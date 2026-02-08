@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     # Infrastructure
     database_url: Optional[str] = None
+    # ADK session backend: use in-memory by default for runtime stability.
+    # Set to "database" only if ADK DB session compatibility is explicitly required.
+    adk_session_backend: str = "in_memory"
 
     # Feature flags
     use_mock_providers: bool = True

@@ -127,6 +127,7 @@ def get_adk_runtime_status() -> dict[str, Any]:
         "adk_last_error": _ADK_LAST_ERROR or import_error,
         "adk_imports_ok": imports_ok,
         "mock_fallback_allowed": mock_fallback_allowed,
+        "adk_session_backend": settings.adk_session_backend,
         "runner_policy": _RUNNER_POLICY,
         "service_revision": os.getenv("K_REVISION"),
         "service_service": os.getenv("K_SERVICE"),
@@ -1011,7 +1012,7 @@ class AdkRunner:
             except Exception as exc:
                 create_error = exc
                 if not self._is_session_exists_error(exc):
-                    logger.warning(
+                    logger.error(
                         "ADK session create failed; validating existence",
                         incident_id=incident_id,
                         error=str(exc),
@@ -1038,7 +1039,7 @@ class AdkRunner:
                 )
             except Exception as exc:
                 if not self._is_session_exists_error(exc):
-                    logger.warning(
+                    logger.error(
                         "ADK session create retry failed",
                         incident_id=incident_id,
                         error=str(exc),
@@ -1074,7 +1075,7 @@ class AdkRunner:
             except Exception as exc:
                 if not self._is_session_not_found_error(exc):
                     raise
-                logger.warning(
+                logger.error(
                     "ADK run failed with missing session; recreating and retrying once",
                     incident_id=incident_id,
                     backend=backend_label,
@@ -1103,17 +1104,30 @@ class AdkRunner:
             return state
 
         session_backend = "in_memory"
-        if settings.database_url:
+        configured_backend = (settings.adk_session_backend or "in_memory").strip().lower()
+        if configured_backend not in {"in_memory", "database"}:
+            logger.error(
+                "Invalid ADK session backend configured; defaulting to in-memory",
+                configured_backend=configured_backend,
+            )
+            configured_backend = "in_memory"
+
+        if configured_backend == "database" and settings.database_url:
             db_url = self._normalize_database_url_for_adk(settings.database_url)
             try:
                 session_service = DatabaseSessionService(db_url)
                 session_backend = "database"
             except Exception as exc:
-                logger.warning(
+                logger.error(
                     "ADK database session service init failed; falling back to in-memory",
                     error=str(exc),
                 )
                 session_service = InMemorySessionService()
+        elif configured_backend == "database" and not settings.database_url:
+            logger.error(
+                "ADK database session backend requested without DATABASE_URL; falling back to in-memory"
+            )
+            session_service = InMemorySessionService()
         else:
             session_service = InMemorySessionService()
 
@@ -1122,7 +1136,7 @@ class AdkRunner:
         except Exception as exc:
             if session_backend != "database":
                 raise
-            logger.warning(
+            logger.error(
                 "ADK database session backend failed at runtime; retrying incident with in-memory ADK session",
                 incident_id=incident_id,
                 error=str(exc),
