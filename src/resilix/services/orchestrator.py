@@ -533,6 +533,13 @@ async def apply_direct_integrations(
     trace["fallback_used"] = ticket_provider_name.endswith("mock") or code_provider_name.endswith("mock")
     trace["post_processor"] = "direct_integrations"
 
+    requested_jira_api = settings.jira_integration_mode.lower() == "api"
+    requested_github_api = settings.github_integration_mode.lower() == "api"
+    if requested_jira_api and ticket_provider_name != "jira_api":
+        raise RuntimeError("jira_api_requested_but_mock_provider_resolved")
+    if requested_github_api and code_provider_name != "github_api":
+        raise RuntimeError("github_api_requested_but_mock_provider_resolved")
+
     validated_alert = state.get("validated_alert")
     if isinstance(validated_alert, ValidatedAlert):
         validated_model = validated_alert

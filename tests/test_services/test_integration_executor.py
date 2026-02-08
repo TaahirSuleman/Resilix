@@ -5,9 +5,17 @@ from datetime import datetime, timezone
 import pytest
 
 from resilix.models.remediation import JiraTicketResult, RemediationResult, RecommendedAction
+from resilix.config.settings import get_settings
 from resilix.services.integrations.base import MergeGateStatus
 from resilix.services.integrations.mock_providers import MockCodeProvider, MockTicketProvider
 from resilix.services.orchestrator import apply_direct_integrations
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache() -> None:
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 class FakeTicketProvider:
@@ -105,6 +113,8 @@ async def test_apply_direct_integrations_overrides_targets(monkeypatch: pytest.M
         "resilix.services.orchestrator.get_code_provider",
         lambda: (code_provider, "github_api"),
     )
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "api")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "api")
 
     payload = {
         "version": "4",
@@ -178,6 +188,8 @@ async def test_apply_direct_integrations_does_not_noop_with_mock_providers(
         "resilix.services.orchestrator.get_code_provider",
         lambda: (MockCodeProvider(), "github_mock"),
     )
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "mock")
 
     payload = {
         "status": "firing",
@@ -205,3 +217,36 @@ async def test_apply_direct_integrations_does_not_noop_with_mock_providers(
     assert trace.get("ticket_provider") == "jira_mock"
     assert trace.get("code_provider") == "github_mock"
     assert trace.get("fallback_used") is True
+
+
+@pytest.mark.asyncio
+async def test_apply_direct_integrations_raises_when_api_mode_resolves_mock_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "resilix.services.orchestrator.get_ticket_provider",
+        lambda: (MockTicketProvider(), "jira_mock"),
+    )
+    monkeypatch.setattr(
+        "resilix.services.orchestrator.get_code_provider",
+        lambda: (MockCodeProvider(), "github_mock"),
+    )
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "api")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "api")
+
+    payload = {
+        "status": "firing",
+        "alerts": [
+            {
+                "labels": {
+                    "alertname": "HighErrorRate",
+                    "service": "checkout-api",
+                    "severity": "critical",
+                },
+                "annotations": {"summary": "Checkout API error rate spike"},
+                "startsAt": "2026-02-08T12:00:00Z",
+            }
+        ],
+    }
+    with pytest.raises(RuntimeError, match="jira_api_requested_but_mock_provider_resolved"):
+        await apply_direct_integrations(state={}, raw_alert=payload, incident_id="INC-MOCK-STRICT-001")

@@ -97,3 +97,23 @@ def test_state_to_incident_detail_omits_invalid_mttr_when_resolved_before_create
     }
     detail = state_to_incident_detail("INC-999", state)
     assert detail.mttr_seconds is None
+
+
+def test_state_to_incident_detail_prefers_ingest_created_at_over_alert_triggered_at() -> None:
+    state = {
+        "created_at": "2026-02-08T10:54:22.459485+00:00",
+        "validated_alert": {
+            "alert_id": "INC-777",
+            "is_actionable": True,
+            "severity": "critical",
+            "service_name": "checkout-api",
+            "error_type": "HighErrorRate",
+            "error_rate": 5.0,
+            "affected_endpoints": [],
+            "triggered_at": "2023-10-27T10:00:00+00:00",
+            "enrichment": {},
+            "triage_reason": "threshold exceeded",
+        },
+    }
+    detail = state_to_incident_detail("INC-777", state)
+    assert detail.created_at.isoformat() == "2026-02-08T10:54:22.459485+00:00"

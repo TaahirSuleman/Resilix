@@ -65,6 +65,10 @@ def _extract_service_name(state: dict[str, Any]) -> str:
 
 
 def _extract_created_at(state: dict[str, Any]) -> datetime:
+    created = _parse_datetime(state.get("created_at"))
+    if created:
+        return created
+
     validated = state.get("validated_alert")
     if isinstance(validated, dict):
         dt = _parse_datetime(validated.get("triggered_at"))
@@ -75,9 +79,6 @@ def _extract_created_at(state: dict[str, Any]) -> datetime:
         if dt:
             return dt
 
-    created = _parse_datetime(state.get("created_at"))
-    if created:
-        return created
     return datetime.now(timezone.utc)
 
 
