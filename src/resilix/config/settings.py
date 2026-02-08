@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     require_codeowner_review: bool = True
     merge_method: str = "squash"
     adk_strict_mode: bool = False
+    # Deprecated runtime switch. ADK-only runner policy ignores this.
     allow_mock_fallback: bool = True
 
     # Integration modes

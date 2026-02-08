@@ -26,8 +26,12 @@ async def test_static_cache_headers_for_index_and_assets(tmp_path: Path):
     env_overrides = {
         "DATABASE_URL": "",
         "FRONTEND_DIST_DIR": str(dist),
+        "USE_MOCK_PROVIDERS": "false",
+        "GEMINI_API_KEY": "test-key",
     }
-    with patch.dict(os.environ, env_overrides, clear=False):
+    with patch.dict(os.environ, env_overrides, clear=False), patch(
+        "resilix.services.orchestrator._adk_imports_available", return_value=(True, None)
+    ):
         settings_module.get_settings.cache_clear()
         app = create_app()
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

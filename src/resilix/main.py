@@ -19,8 +19,10 @@ from resilix.services.session import ensure_session_store_initialized
 async def _lifespan(_: FastAPI):
     settings = get_settings()
     adk_status = get_adk_runtime_status()
-    if settings.adk_strict_mode and not settings.allow_mock_fallback and not adk_status["adk_ready"]:
-        raise RuntimeError(f"ADK strict mode startup preflight failed: {adk_status['adk_last_error']}")
+    if settings.effective_use_mock_providers():
+        raise RuntimeError("ADK-only startup preflight failed: USE_MOCK_PROVIDERS must be false")
+    if not adk_status["adk_ready"]:
+        raise RuntimeError(f"ADK-only startup preflight failed: {adk_status['adk_last_error']}")
     await ensure_session_store_initialized()
     yield
 

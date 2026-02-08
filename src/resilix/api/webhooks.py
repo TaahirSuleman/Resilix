@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
@@ -44,7 +45,16 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
         },
         "ci_status": "pending",
         "codeowner_review_status": "pending",
-        "integration_trace": {"ticket_provider": "unknown", "code_provider": "unknown", "fallback_used": False},
+        "integration_trace": {
+            "ticket_provider": "unknown",
+            "code_provider": "unknown",
+            "fallback_used": False,
+            "execution_path": "pending",
+            "execution_reason": "accepted_for_processing",
+            "runner_policy": "adk_only",
+            "service_revision": os.getenv("K_REVISION"),
+            "service_service": os.getenv("K_SERVICE"),
+        },
         "timeline": [],
     }
     append_timeline_event(
@@ -62,6 +72,15 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
     merged_state["timeline"] = initial_timeline + state_timeline
     merged_state.setdefault("approval", initial_state["approval"])
     merged_state.setdefault("ci_status", initial_state["ci_status"])
+    trace = merged_state.setdefault("integration_trace", {})
+    trace.setdefault("ticket_provider", "unknown")
+    trace.setdefault("code_provider", "unknown")
+    trace.setdefault("fallback_used", False)
+    trace.setdefault("execution_path", "adk_unavailable")
+    trace.setdefault("execution_reason", "missing_execution_reason")
+    trace.setdefault("runner_policy", "adk_only")
+    trace.setdefault("service_revision", os.getenv("K_REVISION"))
+    trace.setdefault("service_service", os.getenv("K_SERVICE"))
     await store.save(incident_id, merged_state)
 
     validated = merged_state.get("validated_alert")

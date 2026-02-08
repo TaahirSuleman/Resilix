@@ -31,7 +31,8 @@ async def test_full_incident_lifecycle_with_timeline(test_client):
     detail_response = await test_client.get(f"/incidents/{incident_id}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
-    assert detail["integration_trace"]["execution_path"] in {"adk", "mock_runner"}
+    assert detail["integration_trace"]["execution_path"] == "adk"
+    assert detail["integration_trace"]["execution_reason"] == "adk_success"
 
     assert detail["status"] == "awaiting_approval"
     assert detail["pr_status"] == "ci_passed"
@@ -50,7 +51,8 @@ async def test_full_incident_lifecycle_with_timeline(test_client):
     final_detail_response = await test_client.get(f"/incidents/{incident_id}")
     assert final_detail_response.status_code == 200
     final_detail = final_detail_response.json()
-    assert final_detail["integration_trace"]["execution_path"] in {"adk", "mock_runner"}
+    assert final_detail["integration_trace"]["execution_path"] == "adk"
+    assert final_detail["integration_trace"]["execution_reason"] == "adk_success"
 
     assert final_detail["status"] == "resolved"
     assert final_detail["pr_status"] == "merged"
