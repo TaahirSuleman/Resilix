@@ -3,7 +3,7 @@ from __future__ import annotations
 from resilix.agents.adk_shim import LlmAgent
 from resilix.agents.utils import build_agent_config, build_llm_agent
 from resilix.config import get_settings
-from resilix.models.remediation import RemediationResult
+from resilix.models.remediation import RemediationResultPayload
 from resilix.tools.github_tools import github_create_pr, github_merge_pr
 from resilix.tools.validation_tools import code_validation
 
@@ -21,11 +21,11 @@ def build_mechanic_agent() -> LlmAgent:
     return build_llm_agent(
         LlmAgent,
         name="MechanicAgent",
-        model=settings.resolved_gemini_model_pro(),
+        model=settings.resolved_gemini_model_flash(),
         description="Code generation and deployment via GitHub",
         instruction=MECHANIC_INSTRUCTION,
         tools=[github_create_pr, github_merge_pr, code_validation],
         output_key="remediation_result",
-        output_schema=RemediationResult,
+        output_schema=RemediationResultPayload,
         **config,
     )

@@ -24,7 +24,7 @@ def build_sherlock_agent() -> LlmAgent:
     return build_llm_agent(
         LlmAgent,
         name="SherlockAgent",
-        model=settings.resolved_gemini_model_pro(),
+        model=settings.resolved_gemini_model_flash(),
         description="Deep root cause analysis with chain-of-thought reasoning",
         instruction=SHERLOCK_INSTRUCTION,
         tools=[query_logs],

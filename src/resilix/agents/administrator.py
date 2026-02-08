@@ -3,7 +3,7 @@ from __future__ import annotations
 from resilix.agents.adk_shim import LlmAgent
 from resilix.agents.utils import build_agent_config, build_llm_agent
 from resilix.config import get_settings
-from resilix.models.remediation import JiraTicketResult
+from resilix.models.remediation import JiraTicketPayload
 from resilix.tools.jira_tools import jira_create_issue
 
 ADMIN_INSTRUCTION = """You are the Administrator, responsible for governance and audit trails.
@@ -26,6 +26,6 @@ def build_administrator_agent() -> LlmAgent:
         instruction=ADMIN_INSTRUCTION,
         tools=[jira_create_issue],
         output_key="jira_ticket",
-        output_schema=JiraTicketResult,
+        output_schema=JiraTicketPayload,
         **config,
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from resilix.agents.adk_shim import LlmAgent
 from resilix.agents.utils import build_agent_config, build_llm_agent
 from resilix.config import get_settings
-from resilix.models.alert import ValidatedAlert
+from resilix.models.alert import ValidatedAlertPayload
 
 SENTINEL_INSTRUCTION = """You are the Sentinel, a fast alert triage specialist.
 
@@ -28,6 +28,6 @@ def build_sentinel_agent() -> LlmAgent:
         instruction=SENTINEL_INSTRUCTION,
         tools=[],
         output_key="validated_alert",
-        output_schema=ValidatedAlert,
+        output_schema=ValidatedAlertPayload,
         **config,
     )

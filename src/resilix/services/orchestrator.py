@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from enum import Enum
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Any, Callable, Dict
 from zlib import crc32
@@ -9,8 +10,8 @@ from zlib import crc32
 import structlog
 
 from resilix.config import get_settings
-from resilix.models.alert import ValidatedAlert
-from resilix.models.remediation import RecommendedAction, RemediationResult
+from resilix.models.alert import AlertEnrichment, Severity, SignalScores, ValidatedAlert
+from resilix.models.remediation import JiraTicketResult, RecommendedAction, RemediationResult
 from resilix.models.thought_signature import Evidence, RootCauseCategory, ThoughtSignature
 from resilix.models.timeline import TimelineEventType
 from resilix.services.admin_service import build_ticket_from_signature
@@ -56,6 +57,45 @@ def _parse_dt(value: Any) -> datetime:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed
     return datetime.now(timezone.utc)
+
+
+def _flatten_exception_messages(exc: BaseException) -> list[str]:
+    messages: list[str] = []
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        text = str(current)
+        if text:
+            messages.append(text)
+        sub = getattr(current, "exceptions", None)
+        if isinstance(sub, (tuple, list)):
+            stack.extend(sub)
+        cause = getattr(current, "__cause__", None)
+        if isinstance(cause, BaseException):
+            stack.append(cause)
+        context = getattr(current, "__context__", None)
+        if isinstance(context, BaseException):
+            stack.append(context)
+    # De-duplicate while preserving order.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for message in messages:
+        if message in seen:
+            continue
+        seen.add(message)
+        unique.append(message)
+    return unique
+
+
+def _enum_token(value: Any) -> str:
+    if isinstance(value, Enum):
+        return str(value.value).lower()
+    text = str(value).strip().lower()
+    if "." in text:
+        text = text.split(".")[-1]
+    return text
 
 
 def _set_adk_last_error(error: str | None) -> None:
@@ -238,13 +278,13 @@ def _normalize_adk_thought_signature(value: Any, incident_id: str) -> ThoughtSig
                     }
                 )
 
-    raw_category = str(value.get("root_cause_category") or RootCauseCategory.CODE_BUG.value).lower()
+    raw_category = _enum_token(value.get("root_cause_category") or RootCauseCategory.CODE_BUG.value)
     try:
         category = RootCauseCategory(raw_category)
     except ValueError:
         category = RootCauseCategory.CODE_BUG
 
-    raw_action = str(value.get("recommended_action") or RecommendedAction.FIX_CODE.value).lower()
+    raw_action = _enum_token(value.get("recommended_action") or RecommendedAction.FIX_CODE.value)
     try:
         action = RecommendedAction(raw_action)
     except ValueError:
@@ -272,6 +312,106 @@ def _normalize_adk_thought_signature(value: Any, incident_id: str) -> ThoughtSig
         "investigation_duration_seconds": float(value.get("investigation_duration_seconds") or 0.0),
     }
     return ThoughtSignature.model_validate(payload)
+
+
+def _normalize_adk_validated_alert(value: Any, incident_id: str) -> ValidatedAlert | None:
+    if value is None:
+        return None
+    if isinstance(value, ValidatedAlert):
+        return value
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+
+    try:
+        severity = Severity(str(value.get("severity", "high")).lower())
+    except ValueError:
+        severity = Severity.HIGH
+
+    try:
+        confidence = float(value.get("deterministic_confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    payload = {
+        "alert_id": str(value.get("alert_id") or incident_id),
+        "is_actionable": bool(value.get("is_actionable", True)),
+        "severity": severity,
+        "service_name": str(value.get("service_name") or "unknown-service"),
+        "error_type": str(value.get("error_type") or "UnknownAlert"),
+        "error_rate": float(value.get("error_rate") or 0.0),
+        "affected_endpoints": [str(item) for item in (value.get("affected_endpoints") or []) if item is not None],
+        "triggered_at": _parse_dt(value.get("triggered_at")),
+        "enrichment": AlertEnrichment(
+            signal_scores=SignalScores(
+                error_rate_high=int(value.get("signal_error_rate_high", 0) or 0),
+                health_flapping=int(value.get("signal_health_flapping", 0) or 0),
+                backlog_growth=int(value.get("signal_backlog_growth", 0) or 0),
+                dependency_timeout=int(value.get("signal_dependency_timeout", 0) or 0),
+            ),
+            weighted_score=float(value.get("weighted_score", 0.0) or 0.0),
+            used_llm_fallback=bool(value.get("used_llm_fallback", False)),
+            deterministic_confidence=max(0.0, min(1.0, confidence)),
+        ),
+        "triage_reason": str(value.get("triage_reason") or "No triage reason provided"),
+    }
+    return ValidatedAlert.model_validate(payload)
+
+
+def _normalize_adk_jira_ticket(value: Any) -> JiraTicketResult | None:
+    if value is None:
+        return None
+    if isinstance(value, JiraTicketResult):
+        return value
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+
+    payload = {
+        "ticket_key": str(value.get("ticket_key") or ""),
+        "ticket_url": str(value.get("ticket_url") or ""),
+        "summary": str(value.get("summary") or ""),
+        "priority": str(value.get("priority") or "P2"),
+        "status": str(value.get("status") or "Open"),
+        "created_at": _parse_dt(value.get("created_at")),
+    }
+    return JiraTicketResult.model_validate(payload)
+
+
+def _normalize_adk_remediation(value: Any) -> RemediationResult | None:
+    if value is None:
+        return None
+    if isinstance(value, RemediationResult):
+        return value
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+
+    action_raw = _enum_token(value.get("action_taken") or RecommendedAction.FIX_CODE.value)
+    try:
+        action = RecommendedAction(action_raw)
+    except ValueError:
+        action = RecommendedAction.FIX_CODE
+
+    try:
+        exec_seconds = float(value.get("execution_time_seconds") or 0.0)
+    except (TypeError, ValueError):
+        exec_seconds = 0.0
+
+    payload = {
+        "success": bool(value.get("success", False)),
+        "action_taken": action,
+        "branch_name": value.get("branch_name"),
+        "pr_number": value.get("pr_number"),
+        "pr_url": value.get("pr_url"),
+        "pr_merged": bool(value.get("pr_merged", False)),
+        "execution_time_seconds": exec_seconds,
+        "error_message": value.get("error_message"),
+    }
+    return RemediationResult.model_validate(payload)
 
 
 def _infer_root_cause_category(signal_scores: dict[str, int]) -> tuple[RootCauseCategory, RecommendedAction]:
@@ -1043,15 +1183,24 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
     agent_instance = root_agent() if callable(root_agent) else root_agent
     try:
         state = await AdkRunner(agent_instance).run(raw_alert, incident_id)
+        normalized_alert = _normalize_adk_validated_alert(state.get("validated_alert"), incident_id)
+        if normalized_alert is not None:
+            state["validated_alert"] = normalized_alert.model_dump()
         normalized_signature = _normalize_adk_thought_signature(state.get("thought_signature"), incident_id)
         if normalized_signature is not None:
             state["thought_signature"] = normalized_signature.model_dump()
         state = await apply_direct_integrations(state=state, raw_alert=raw_alert, incident_id=incident_id)
+        normalized_ticket = _normalize_adk_jira_ticket(state.get("jira_ticket"))
+        if normalized_ticket is not None:
+            state["jira_ticket"] = normalized_ticket.model_dump()
+        normalized_remediation = _normalize_adk_remediation(state.get("remediation_result"))
+        if normalized_remediation is not None:
+            state["remediation_result"] = normalized_remediation.model_dump()
         _set_adk_last_error(None)
         _finalize_execution_trace(state, path="adk", reason="adk_success")
         return state
     except Exception as exc:
-        error = str(exc)
+        error = " | ".join(_flatten_exception_messages(exc)) or str(exc)
         _set_adk_last_error(error)
         reason = "adk_runtime_exception"
         logger.error(
