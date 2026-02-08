@@ -248,6 +248,47 @@ async def test_run_orchestrator_returns_adk_unavailable_when_adk_run_raises(
 
 
 @pytest.mark.asyncio
+async def test_run_orchestrator_recovers_missing_tool_error_via_direct_integrations(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("JIRA_INTEGRATION_MODE", "mock")
+    monkeypatch.setenv("GITHUB_INTEGRATION_MODE", "mock")
+    settings_module.get_settings.cache_clear()
+
+    async def _raise_run(self, raw_alert: dict, incident_id: str):  # type: ignore[no-untyped-def]
+        raise RuntimeError("Tool 'list_commits' not found")
+
+    monkeypatch.setattr("resilix.services.orchestrator.AdkRunner.run", _raise_run)
+
+    payload = {
+        "status": "firing",
+        "alerts": [
+            {
+                "labels": {
+                    "alertname": "DNSResolverFlapping",
+                    "service": "dns-resolver",
+                    "severity": "critical",
+                },
+                "annotations": {"summary": "flapping with backlog"},
+                "startsAt": "2026-02-05T12:38:23Z",
+            }
+        ],
+    }
+    state = await run_orchestrator(payload, "INC-RECOVER-001", root_agent=object())
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_recovered"
+    assert trace.get("execution_reason") == "adk_missing_tool_recovered"
+    assert state.get("thought_signature") is not None
+    assert state.get("jira_ticket") is not None
+    assert state.get("remediation_result") is not None
+
+
+@pytest.mark.asyncio
 async def test_run_orchestrator_returns_adk_unavailable_for_placeholder_api_key_without_creating_agent(
     monkeypatch: pytest.MonkeyPatch,
 ):

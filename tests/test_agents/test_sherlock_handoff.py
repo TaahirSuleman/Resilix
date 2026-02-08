@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from resilix.agents.sherlock import build_sherlock_agent
 from resilix.services.orchestrator import MockRunner
 
 
@@ -36,3 +37,10 @@ async def test_sherlock_thought_signature_handoff_contains_required_fields() -> 
     assert signature.root_cause_category.value == "config_error"
     assert signature.target_file is not None
     assert len(signature.evidence_chain) >= 1
+
+
+def test_sherlock_registers_expected_tools() -> None:
+    agent = build_sherlock_agent()
+    tool_names = {tool.__name__ for tool in agent.tools}
+    assert "query_logs" in tool_names
+    assert "list_commits" in tool_names
