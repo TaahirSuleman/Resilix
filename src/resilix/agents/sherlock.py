@@ -3,7 +3,7 @@ from __future__ import annotations
 from resilix.agents.adk_shim import LlmAgent
 from resilix.agents.utils import build_agent_config, build_llm_agent
 from resilix.config import get_settings
-from resilix.models.thought_signature import ThoughtSignature
+from resilix.models.thought_signature import ThoughtSignaturePayload
 from resilix.tools.log_tools import query_logs
 
 SHERLOCK_INSTRUCTION = """You are Sherlock, a root-cause investigator.
@@ -24,11 +24,11 @@ def build_sherlock_agent() -> LlmAgent:
     return build_llm_agent(
         LlmAgent,
         name="SherlockAgent",
-        model=settings.resolved_gemini_model_flash(),
+        model=settings.resolved_gemini_model_pro(),
         description="Deep root cause analysis with chain-of-thought reasoning",
         instruction=SHERLOCK_INSTRUCTION,
         tools=[query_logs],
         output_key="thought_signature",
-        output_schema=ThoughtSignature,
+        output_schema=ThoughtSignaturePayload,
         **config,
     )

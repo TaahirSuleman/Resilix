@@ -413,3 +413,43 @@ async def test_run_orchestrator_marks_unavailable_when_session_unrecoverable(mon
     trace = state.get("integration_trace", {})
     assert trace.get("execution_path") == "adk_unavailable"
     assert trace.get("execution_reason") == "adk_runtime_exception"
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_normalizes_sherlock_payload_schema(monkeypatch: pytest.MonkeyPatch):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    settings_module.get_settings.cache_clear()
+
+    async def _fake_adk_run(self, raw_alert: dict, incident_id: str):  # type: ignore[no-untyped-def]
+        return {
+            "raw_alert": raw_alert,
+            "thought_signature": {
+                "incident_id": incident_id,
+                "root_cause": "Config drift",
+                "root_cause_category": "config_error",
+                "evidence_chain": [
+                    "Targets alternating between healthy and unhealthy",
+                    "Propagation backlog increased",
+                ],
+                "affected_services": ["checkout-api"],
+                "confidence_score": 0.88,
+                "recommended_action": "config_change",
+                "target_repository": "TaahirSuleman/resilix-demo-app",
+                "target_file": "infra/service-config.yaml",
+                "target_line": 1,
+                "related_commits": [],
+                "investigation_summary": "Signals correlate to config drift.",
+                "investigation_duration_seconds": 3.1,
+            },
+        }
+
+    monkeypatch.setattr("resilix.services.orchestrator.AdkRunner.run", _fake_adk_run)
+    state = await run_orchestrator({"status": "firing", "alerts": []}, "INC-ADK-SCHEMA-001", root_agent=object())
+    signature = state.get("thought_signature")
+    assert isinstance(signature, dict)
+    assert isinstance(signature.get("evidence_chain"), list)
+    assert isinstance(signature["evidence_chain"][0], dict)
+    assert signature["evidence_chain"][0]["content"] == "Targets alternating between healthy and unhealthy"

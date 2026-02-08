@@ -21,7 +21,7 @@ def build_mechanic_agent() -> LlmAgent:
     return build_llm_agent(
         LlmAgent,
         name="MechanicAgent",
-        model=settings.resolved_gemini_model_flash(),
+        model=settings.resolved_gemini_model_pro(),
         description="Code generation and deployment via GitHub",
         instruction=MECHANIC_INSTRUCTION,
         tools=[github_create_pr, github_merge_pr, code_validation],

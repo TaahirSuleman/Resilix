@@ -40,3 +40,21 @@ class ThoughtSignature(BaseModel):
 
     investigation_summary: str
     investigation_duration_seconds: float
+
+
+class ThoughtSignaturePayload(BaseModel):
+    """ADK-friendly output schema with primitive/list types only."""
+
+    incident_id: str
+    root_cause: str
+    root_cause_category: str
+    evidence_chain: List[str] = Field(default_factory=list)
+    affected_services: List[str] = Field(default_factory=list)
+    confidence_score: float = Field(ge=0, le=1)
+    recommended_action: str
+    target_repository: Optional[str] = None
+    target_file: Optional[str] = None
+    target_line: Optional[int] = None
+    related_commits: List[str] = Field(default_factory=list)
+    investigation_summary: str
+    investigation_duration_seconds: float

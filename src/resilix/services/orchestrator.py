@@ -162,6 +162,81 @@ def _weighted_score(validated_alert: Any) -> float:
         return 0.0
 
 
+def _normalize_adk_thought_signature(value: Any, incident_id: str) -> ThoughtSignature | None:
+    if value is None:
+        return None
+    if isinstance(value, ThoughtSignature):
+        return value
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+
+    raw_evidence = value.get("evidence_chain") or []
+    normalized_evidence: list[dict[str, Any]] = []
+    if isinstance(raw_evidence, list):
+        for item in raw_evidence:
+            if isinstance(item, dict):
+                content = str(item.get("content") or item.get("text") or "").strip()
+                if not content:
+                    continue
+                normalized_evidence.append(
+                    {
+                        "source": str(item.get("source") or "logs"),
+                        "timestamp": _parse_dt(item.get("timestamp")),
+                        "content": content,
+                        "relevance": str(item.get("relevance") or "signal correlation"),
+                    }
+                )
+            else:
+                text = str(item).strip()
+                if not text:
+                    continue
+                normalized_evidence.append(
+                    {
+                        "source": "logs",
+                        "timestamp": datetime.now(timezone.utc),
+                        "content": text,
+                        "relevance": "signal correlation",
+                    }
+                )
+
+    raw_category = str(value.get("root_cause_category") or RootCauseCategory.CODE_BUG.value).lower()
+    try:
+        category = RootCauseCategory(raw_category)
+    except ValueError:
+        category = RootCauseCategory.CODE_BUG
+
+    raw_action = str(value.get("recommended_action") or RecommendedAction.FIX_CODE.value).lower()
+    try:
+        action = RecommendedAction(raw_action)
+    except ValueError:
+        action = RecommendedAction.FIX_CODE
+
+    confidence_raw = value.get("confidence_score", 0.7)
+    try:
+        confidence = max(0.0, min(1.0, float(confidence_raw)))
+    except (TypeError, ValueError):
+        confidence = 0.7
+
+    payload = {
+        "incident_id": str(value.get("incident_id") or incident_id),
+        "root_cause": str(value.get("root_cause") or "Root cause not provided"),
+        "root_cause_category": category,
+        "evidence_chain": normalized_evidence,
+        "affected_services": [str(s) for s in (value.get("affected_services") or []) if s is not None],
+        "confidence_score": confidence,
+        "recommended_action": action,
+        "target_repository": value.get("target_repository"),
+        "target_file": value.get("target_file"),
+        "target_line": value.get("target_line"),
+        "related_commits": [str(c) for c in (value.get("related_commits") or []) if c is not None],
+        "investigation_summary": str(value.get("investigation_summary") or "Investigation summary unavailable"),
+        "investigation_duration_seconds": float(value.get("investigation_duration_seconds") or 0.0),
+    }
+    return ThoughtSignature.model_validate(payload)
+
+
 def _infer_root_cause_category(signal_scores: dict[str, int]) -> tuple[RootCauseCategory, RecommendedAction]:
     if signal_scores.get("health_flapping", 0) > 0 and signal_scores.get("backlog_growth", 0) > 0:
         return RootCauseCategory.CONFIG_ERROR, RecommendedAction.CONFIG_CHANGE
@@ -709,6 +784,9 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
     agent_instance = root_agent() if callable(root_agent) else root_agent
     try:
         state = await AdkRunner(agent_instance).run(raw_alert, incident_id)
+        normalized_signature = _normalize_adk_thought_signature(state.get("thought_signature"), incident_id)
+        if normalized_signature is not None:
+            state["thought_signature"] = normalized_signature.model_dump()
         _set_adk_last_error(None)
         _finalize_execution_trace(state, path="adk", reason="adk_success")
         return state
