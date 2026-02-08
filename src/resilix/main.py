@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from resilix.api import health_router, incidents_router, webhooks_router
 from resilix.config import get_settings
 from resilix.config.logging import configure_logging
+from resilix.services.integrations.router import get_provider_readiness
 from resilix.services.orchestrator import get_adk_runtime_status
 from resilix.services.session import ensure_session_store_initialized
 
@@ -23,6 +24,28 @@ async def _lifespan(_: FastAPI):
         raise RuntimeError("ADK-only startup preflight failed: USE_MOCK_PROVIDERS must be false")
     if not adk_status["adk_ready"]:
         raise RuntimeError(f"ADK-only startup preflight failed: {adk_status['adk_last_error']}")
+    readiness = get_provider_readiness()
+    if adk_status["runner_policy"] == "adk_only":
+        jira_mode = settings.jira_integration_mode.strip().lower()
+        github_mode = settings.github_integration_mode.strip().lower()
+        if jira_mode == "api" and not bool(readiness["jira"]["ready"]):
+            raise RuntimeError(
+                "ADK-only startup preflight failed: Jira provider not ready "
+                f"(reason={readiness['jira']['reason']}, missing_fields={readiness['jira']['missing_fields']})"
+            )
+        if github_mode == "api" and not bool(readiness["github"]["ready"]):
+            raise RuntimeError(
+                "ADK-only startup preflight failed: GitHub provider not ready "
+                f"(reason={readiness['github']['reason']}, missing_fields={readiness['github']['missing_fields']})"
+            )
+        if jira_mode not in {"api", "mock"}:
+            raise RuntimeError(
+                "ADK-only startup preflight failed: JIRA_INTEGRATION_MODE must be one of {api,mock}"
+            )
+        if github_mode not in {"api", "mock"}:
+            raise RuntimeError(
+                "ADK-only startup preflight failed: GITHUB_INTEGRATION_MODE must be one of {api,mock}"
+            )
     await ensure_session_store_initialized()
     yield
 

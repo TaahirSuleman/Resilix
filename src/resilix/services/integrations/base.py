@@ -13,6 +13,33 @@ class MergeGateStatus:
     details: dict[str, object]
 
 
+class ProviderConfigError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        provider: str,
+        mode: str,
+        reason_code: str,
+        missing_or_invalid_fields: list[str] | None = None,
+    ) -> None:
+        self.provider = provider
+        self.mode = mode
+        self.reason_code = reason_code
+        self.missing_or_invalid_fields = missing_or_invalid_fields or []
+        fields = ", ".join(self.missing_or_invalid_fields) or "none"
+        super().__init__(
+            f"{provider}_{reason_code}: mode={mode}; missing_or_invalid_fields={fields}"
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "mode": self.mode,
+            "reason": self.reason_code,
+            "missing_fields": self.missing_or_invalid_fields,
+        }
+
+
 class TicketProvider(Protocol):
     async def create_incident_ticket(
         self,
