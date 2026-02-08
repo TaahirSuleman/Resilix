@@ -11,7 +11,8 @@ from resilix.agent import get_root_agent
 from resilix.config import get_settings
 from resilix.models.timeline import TimelineEventType
 from resilix.services.incident_mapper import append_timeline_event
-from resilix.services.orchestrator import run_orchestrator
+from resilix.services.integrations.router import get_provider_readiness
+from resilix.services.orchestrator import get_adk_runtime_status, run_orchestrator
 from resilix.services.session import get_session_store
 
 router = APIRouter()
@@ -29,9 +30,43 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
     payload = await request.json()
     _validate_prometheus_payload(payload)
 
+    settings = get_settings()
+    adk_status = get_adk_runtime_status()
+    readiness = get_provider_readiness()
+    if adk_status["runner_policy"] == "adk_only":
+        mode_checks = (
+            ("jira", settings.jira_integration_mode.strip().lower()),
+            ("github", settings.github_integration_mode.strip().lower()),
+        )
+        for provider, mode in mode_checks:
+            provider_readiness = readiness[provider]
+            if mode == "api" and not bool(provider_readiness["ready"]):
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "provider_not_ready",
+                        "details": {
+                            "provider": provider,
+                            "reason": provider_readiness["reason"],
+                            "missing_fields": provider_readiness["missing_fields"],
+                        },
+                    },
+                )
+            if mode not in {"api", "mock"}:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "provider_not_ready",
+                        "details": {
+                            "provider": provider,
+                            "reason": "invalid_mode",
+                            "missing_fields": [f"{provider.upper()}_INTEGRATION_MODE"],
+                        },
+                    },
+                )
+
     incident_id = f"INC-{uuid4().hex[:8]}"
     created_at = datetime.now(timezone.utc).isoformat()
-    settings = get_settings()
     store = get_session_store()
 
     initial_state: Dict[str, Any] = {

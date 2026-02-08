@@ -179,6 +179,13 @@ def derive_status_fields(state: dict[str, Any]) -> tuple[IncidentStatus, Approva
     remediation = state.get("remediation_result")
     approval = state.get("approval", {}) if isinstance(state.get("approval"), dict) else {}
     ci_status = state.get("ci_status", "pending")
+    integration_trace = (
+        state.get("integration_trace") if isinstance(state.get("integration_trace"), dict) else {}
+    )
+    execution_path = str(integration_trace.get("execution_path", "")).lower()
+
+    if execution_path == "adk_unavailable":
+        return (IncidentStatus.FAILED, ApprovalStatus.NOT_REQUIRED, PRStatus.NOT_CREATED)
 
     if remediation is None:
         return (IncidentStatus.PROCESSING, ApprovalStatus.NOT_REQUIRED, PRStatus.NOT_CREATED)
@@ -188,13 +195,22 @@ def derive_status_fields(state: dict[str, Any]) -> tuple[IncidentStatus, Approva
         pr_url = remediation.get("pr_url")
         merged = remediation.get("pr_merged", False)
         success = remediation.get("success", False)
+        error_message = remediation.get("error_message")
     else:
         pr_number = getattr(remediation, "pr_number", None)
         pr_url = getattr(remediation, "pr_url", None)
         merged = getattr(remediation, "pr_merged", False)
         success = getattr(remediation, "success", False)
+        error_message = getattr(remediation, "error_message", None)
 
     has_pr = bool(pr_number or pr_url)
+
+    if not success and error_message:
+        if merged:
+            return (IncidentStatus.FAILED, ApprovalStatus.NOT_REQUIRED, PRStatus.MERGED)
+        if has_pr:
+            return (IncidentStatus.FAILED, ApprovalStatus.NOT_REQUIRED, PRStatus.PENDING_CI)
+        return (IncidentStatus.FAILED, ApprovalStatus.NOT_REQUIRED, PRStatus.NOT_CREATED)
 
     if not has_pr:
         if success:

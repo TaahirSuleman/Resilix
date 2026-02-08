@@ -58,7 +58,7 @@ steps:
 substitutions:
   _REGION: 'us-east1'
   _REPOSITORY: 'resilix-containers'
-  _SERVICE_NAME: 'resilix-service'
+  _SERVICE_NAME: 'resilix-agentic-backend'
 
 images:
   - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY/resilix:$COMMIT_SHA'

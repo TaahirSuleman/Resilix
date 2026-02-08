@@ -6,6 +6,7 @@ import structlog
 from resilix.models.incident import IncidentDetailResponse, IncidentListResponse
 from resilix.models.timeline import TimelineEventType
 from resilix.config import get_settings
+from resilix.services.integrations.base import ProviderConfigError
 from resilix.services import apply_approval_and_merge, evaluate_approval_request, get_code_provider, get_ticket_provider
 from resilix.services.incident_mapper import append_timeline_event, state_to_incident_detail, state_to_incident_summary
 from resilix.services.session import get_session_store
@@ -55,7 +56,13 @@ async def approve_merge(incident_id: str) -> IncidentDetailResponse:
     elif state.get("thought_signature") is not None:
         repository = getattr(state["thought_signature"], "target_repository", None)
 
-    code_provider, provider_name = get_code_provider()
+    try:
+        code_provider, provider_name = get_code_provider()
+    except ProviderConfigError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "provider_not_ready", "details": exc.as_dict()},
+        ) from exc
     if provider_name == "github_api" and pr_number and repository:
         gate = await code_provider.get_merge_gate_status(repository=str(repository), pr_number=int(pr_number))
         state["ci_status"] = "ci_passed" if gate.ci_passed else "pending"
@@ -87,7 +94,13 @@ async def approve_merge(incident_id: str) -> IncidentDetailResponse:
     elif ticket is not None:
         ticket_key = getattr(ticket, "ticket_key", None)
     if ticket_key:
-        ticket_provider, _ = get_ticket_provider()
+        try:
+            ticket_provider, _ = get_ticket_provider()
+        except ProviderConfigError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "provider_not_ready", "details": exc.as_dict()},
+            ) from exc
         transition_result = await ticket_provider.transition_ticket(
             ticket_key=str(ticket_key),
             target_status=settings.jira_status_done,
