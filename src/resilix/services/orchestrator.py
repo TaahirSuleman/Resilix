@@ -36,6 +36,12 @@ _ADK_LAST_ERROR: str | None = None
 _RUNNER_POLICY = "adk_only"
 
 
+def _mock_fallback_allowed(settings: Any) -> bool:
+    return bool(getattr(settings, "allow_mock_fallback", False)) and not bool(
+        getattr(settings, "adk_strict_mode", False)
+    )
+
+
 def _parse_dt(value: Any) -> datetime:
     if isinstance(value, datetime):
         if value.tzinfo is None:
@@ -73,7 +79,7 @@ def get_adk_runtime_status() -> dict[str, Any]:
     use_mock_providers = settings.effective_use_mock_providers()
     imports_ok, import_error = _adk_imports_available()
     ready = imports_ok and usable_api_key and not use_mock_providers
-    mock_fallback_allowed = False
+    mock_fallback_allowed = _mock_fallback_allowed(settings)
     mode = "strict"
     return {
         "adk_mode": mode,
@@ -112,6 +118,7 @@ def _finalize_execution_trace(
 def _build_adk_unavailable_state(
     *,
     raw_alert: Dict[str, Any],
+    incident_id: str,
     reason: str,
     error: str | None,
 ) -> Dict[str, Any]:
@@ -119,15 +126,44 @@ def _build_adk_unavailable_state(
         "raw_alert": raw_alert,
         "ci_status": "pending",
         "codeowner_review_status": "pending",
-        "remediation_result": RemediationResult(
-            success=False,
-            action_taken=RecommendedAction.FIX_CODE,
-            pr_merged=False,
-            execution_time_seconds=0.0,
-            error_message=error or reason,
-        ).model_dump(),
         "integration_trace": {},
     }
+    settings = get_settings()
+    action_taken = RecommendedAction.FIX_CODE
+    if _mock_fallback_allowed(settings):
+        try:
+            runner = MockRunner()
+            validated, sentinel_trace = evaluate_alert(
+                payload=raw_alert,
+                incident_id=incident_id,
+                llm_fallback=runner._sentinel_llm_fallback,
+            )
+            signature = _build_fallback_thought_signature(
+                incident_id=incident_id,
+                raw_alert=raw_alert,
+                validated_alert=validated,
+            )
+            state["validated_alert"] = validated.model_dump()
+            state["sentinel_trace"] = sentinel_trace
+            state["thought_signature"] = signature.model_dump()
+            action_taken = signature.recommended_action
+            trace = state.setdefault("integration_trace", {})
+            trace["fallback_used"] = True
+            trace["fallback_path"] = "deterministic"
+        except Exception as exc:
+            logger.warning(
+                "Fallback signature build failed",
+                incident_id=incident_id,
+                error=str(exc),
+            )
+
+    state["remediation_result"] = RemediationResult(
+        success=False,
+        action_taken=action_taken,
+        pr_merged=False,
+        execution_time_seconds=0.0,
+        error_message=error or reason,
+    ).model_dump()
     _finalize_execution_trace(state, path="adk_unavailable", reason=reason, adk_error=error)
     return state
 
@@ -985,14 +1021,24 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
         error = "USE_MOCK_PROVIDERS is true"
         _set_adk_last_error(error)
         logger.error("ADK-only runner policy rejects mock provider mode", reason=reason, incident_id=incident_id)
-        return _build_adk_unavailable_state(raw_alert=raw_alert, reason=reason, error=error)
+        return _build_adk_unavailable_state(
+            raw_alert=raw_alert,
+            incident_id=incident_id,
+            reason=reason,
+            error=error,
+        )
 
     if not usable_api_key:
         reason = "missing_or_placeholder_api_key"
         error = "Gemini API key is missing or placeholder"
         _set_adk_last_error(error)
         logger.error("ADK-only runner policy rejects unusable Gemini API key", incident_id=incident_id)
-        return _build_adk_unavailable_state(raw_alert=raw_alert, reason=reason, error=error)
+        return _build_adk_unavailable_state(
+            raw_alert=raw_alert,
+            incident_id=incident_id,
+            reason=reason,
+            error=error,
+        )
 
     agent_instance = root_agent() if callable(root_agent) else root_agent
     try:
@@ -1013,4 +1059,9 @@ async def run_orchestrator(raw_alert: Dict[str, Any], incident_id: str, root_age
             error=error,
             incident_id=incident_id,
         )
-        return _build_adk_unavailable_state(raw_alert=raw_alert, reason=reason, error=error)
+        return _build_adk_unavailable_state(
+            raw_alert=raw_alert,
+            incident_id=incident_id,
+            reason=reason,
+            error=error,
+        )
