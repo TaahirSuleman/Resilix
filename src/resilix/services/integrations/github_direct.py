@@ -152,6 +152,7 @@ class GithubDirectProvider:
             pr_data = pr_resp.json()
             head_sha = pr_data["head"]["sha"]
             mergeable_state = str(pr_data.get("mergeable_state") or "")
+            review_decision = str(pr_data.get("review_decision") or "").upper()
 
             status_resp = await client.get(
                 f"https://api.github.com/repos/{self._owner}/{repo_name}/commits/{head_sha}/status",
@@ -170,11 +171,20 @@ class GithubDirectProvider:
             has_approved_review = any(str(review.get("state")) == "APPROVED" for review in reviews)
 
         ci_passed = ci_state == "success"
-        codeowner_reviewed = has_approved_review or mergeable_state in {"clean", "has_hooks"}
+        codeowner_reviewed = (
+            review_decision == "APPROVED"
+            or has_approved_review
+            or mergeable_state in {"clean", "has_hooks"}
+        )
         return MergeGateStatus(
             ci_passed=ci_passed,
             codeowner_reviewed=codeowner_reviewed,
-            details={"ci_state": ci_state, "mergeable_state": mergeable_state},
+            details={
+                "ci_state": ci_state,
+                "mergeable_state": mergeable_state,
+                "review_decision": review_decision,
+                "has_approved_review": has_approved_review,
+            },
         )
 
     async def merge_pr(self, *, repository: str, pr_number: int, method: str) -> bool:
