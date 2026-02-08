@@ -20,8 +20,8 @@ class Settings(BaseSettings):
 
     # Gemini thinking configuration
     sentinel_thinking_level: str = "low"
-    sherlock_thinking_level: str = "high"
-    mechanic_thinking_level: str = "high"
+    sherlock_thinking_level: str = "medium"
+    mechanic_thinking_level: str = "low"
     include_thoughts: bool = True
 
     # Infrastructure
