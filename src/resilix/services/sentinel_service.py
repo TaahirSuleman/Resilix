@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
-from resilix.models.alert import Severity, ValidatedAlert
+from resilix.models.alert import AlertEnrichment, Severity, SignalScores, ValidatedAlert
 
 SignalFallback = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -190,12 +190,17 @@ def evaluate_alert(
         error_rate=round(error_rate, 3),
         affected_endpoints=affected_endpoints,
         triggered_at=created,
-        enrichment={
-            "signal_scores": dict(signal_hits),
-            "weighted_score": score,
-            "used_llm_fallback": used_llm_fallback,
-            "deterministic_confidence": round(deterministic_confidence, 3),
-        },
+        enrichment=AlertEnrichment(
+            signal_scores=SignalScores(
+                error_rate_high=int(signal_hits.get("error_rate_high", 0)),
+                health_flapping=int(signal_hits.get("health_flapping", 0)),
+                backlog_growth=int(signal_hits.get("backlog_growth", 0)),
+                dependency_timeout=int(signal_hits.get("dependency_timeout", 0)),
+            ),
+            weighted_score=score,
+            used_llm_fallback=used_llm_fallback,
+            deterministic_confidence=round(deterministic_confidence, 3),
+        ),
         triage_reason=triage_reason,
     )
     trace = {

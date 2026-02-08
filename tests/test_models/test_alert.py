@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from resilix.models.alert import Severity, ValidatedAlert
+from resilix.models.alert import AlertEnrichment, Severity, SignalScores, ValidatedAlert
 
 
 def test_validated_alert_schema():
@@ -13,7 +13,12 @@ def test_validated_alert_schema():
         error_rate=5.2,
         affected_endpoints=["/api/checkout"],
         triggered_at=datetime.now(UTC),
-        enrichment={"foo": "bar"},
+        enrichment=AlertEnrichment(
+            signal_scores=SignalScores(error_rate_high=1, health_flapping=2),
+            weighted_score=5.0,
+            used_llm_fallback=False,
+            deterministic_confidence=0.8,
+        ),
         triage_reason="Error rate exceeded",
     )
 

@@ -132,11 +132,34 @@ def _build_adk_unavailable_state(
 
 
 def _signal_map(validated_alert) -> dict[str, int]:
-    enrichment = getattr(validated_alert, "enrichment", {}) or {}
-    raw = enrichment.get("signal_scores", {})
+    enrichment = getattr(validated_alert, "enrichment", None)
+    raw = None
+    if enrichment is not None:
+        if isinstance(enrichment, dict):
+            raw = enrichment.get("signal_scores", {})
+        else:
+            raw = getattr(enrichment, "signal_scores", {})
     if isinstance(raw, dict):
         return {str(key): int(value) for key, value in raw.items() if isinstance(value, (int, float))}
+    if hasattr(raw, "model_dump"):
+        dumped = raw.model_dump()
+        if isinstance(dumped, dict):
+            return {str(key): int(value) for key, value in dumped.items() if isinstance(value, (int, float))}
     return {}
+
+
+def _weighted_score(validated_alert: Any) -> float:
+    enrichment = getattr(validated_alert, "enrichment", None)
+    if enrichment is None:
+        return 0.0
+    if isinstance(enrichment, dict):
+        value = enrichment.get("weighted_score", 0.0)
+    else:
+        value = getattr(enrichment, "weighted_score", 0.0)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _infer_root_cause_category(signal_scores: dict[str, int]) -> tuple[RootCauseCategory, RecommendedAction]:
@@ -273,7 +296,7 @@ class MockRunner:
         else:
             root_cause = "Service capacity limits were exceeded under incident load."
 
-        weighted_score = float((validated_alert.enrichment or {}).get("weighted_score", 0.0))
+        weighted_score = _weighted_score(validated_alert)
         confidence = min(0.98, 0.62 + (weighted_score * 0.04))
 
         return ThoughtSignature(
