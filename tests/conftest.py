@@ -17,14 +17,22 @@ async def test_client() -> AsyncIterator[AsyncClient]:
     session_module._session_store = None
 
     env_overrides = {
-        "USE_MOCK_PROVIDERS": "true",
+        "USE_MOCK_PROVIDERS": "false",
+        "GEMINI_API_KEY": "test-key",
         "DATABASE_URL": "",
         "REQUIRE_PR_APPROVAL": "true",
         "JIRA_INTEGRATION_MODE": "mock",
         "GITHUB_INTEGRATION_MODE": "mock",
     }
 
-    with patch.dict(os.environ, env_overrides, clear=False):
+    async def _patched_adk_run(self, raw_alert: dict, incident_id: str):  # type: ignore[no-untyped-def]
+        from resilix.services.orchestrator import MockRunner
+
+        return await MockRunner().run(raw_alert, incident_id)
+
+    with patch.dict(os.environ, env_overrides, clear=False), patch(
+        "resilix.services.orchestrator.AdkRunner.run", _patched_adk_run
+    ), patch("resilix.services.orchestrator._adk_imports_available", return_value=(True, None)):
         settings_module.get_settings.cache_clear()
         session_module._session_store = None
 

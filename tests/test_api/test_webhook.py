@@ -38,3 +38,9 @@ async def test_webhook_accepts_prometheus_alert(test_client):
     assert "approval_status" in detail
     assert "pr_status" in detail
     assert isinstance(detail["timeline"], list)
+    trace = detail.get("integration_trace") or {}
+    assert isinstance(trace.get("execution_path"), str)
+    assert bool(trace.get("execution_path"))
+    assert isinstance(trace.get("execution_reason"), str)
+    assert bool(trace.get("execution_reason"))
+    assert trace.get("runner_policy") == "adk_only"

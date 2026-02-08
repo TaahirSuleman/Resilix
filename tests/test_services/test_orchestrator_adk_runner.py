@@ -150,7 +150,7 @@ async def test_adk_runner_falls_back_to_in_memory_when_database_service_fails(
 
 
 @pytest.mark.asyncio
-async def test_run_orchestrator_falls_back_to_mock_when_adk_run_raises(
+async def test_run_orchestrator_returns_adk_unavailable_when_adk_run_raises(
     monkeypatch: pytest.MonkeyPatch,
 ):
     import resilix.config.settings as settings_module
@@ -182,15 +182,13 @@ async def test_run_orchestrator_falls_back_to_mock_when_adk_run_raises(
         ],
     }
     state = await run_orchestrator(payload, "INC-FALLBACK-001", root_agent=object())
-
-    assert "validated_alert" in state
-    assert "thought_signature" in state
-    assert state["ci_status"] in ("pending", "ci_passed")
-    assert state.get("integration_trace", {}).get("execution_path") == "mock_runner"
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_unavailable"
+    assert trace.get("execution_reason") == "adk_runtime_exception"
 
 
 @pytest.mark.asyncio
-async def test_run_orchestrator_uses_mock_for_placeholder_api_key_without_creating_agent(
+async def test_run_orchestrator_returns_adk_unavailable_for_placeholder_api_key_without_creating_agent(
     monkeypatch: pytest.MonkeyPatch,
 ):
     import resilix.config.settings as settings_module
@@ -216,8 +214,9 @@ async def test_run_orchestrator_uses_mock_for_placeholder_api_key_without_creati
         ],
     }
     state = await run_orchestrator(payload, "INC-PLACEHOLDER-001", root_agent=_raise_if_called)
-    assert "validated_alert" in state
-    assert state.get("integration_trace", {}).get("execution_path") == "mock_runner"
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_unavailable"
+    assert trace.get("execution_reason") == "missing_or_placeholder_api_key"
 
 
 @pytest.mark.asyncio
@@ -243,7 +242,9 @@ async def test_run_orchestrator_supports_legacy_use_mock_mcp_flag(monkeypatch: p
         ],
     }
     state = await run_orchestrator(payload, "INC-LEGACY-MOCK-FLAG-001", root_agent=object())
-    assert "validated_alert" in state
+    trace = state.get("integration_trace", {})
+    assert trace.get("execution_path") == "adk_unavailable"
+    assert trace.get("execution_reason") == "mock_flag_enabled"
 
 
 @pytest.mark.asyncio
@@ -303,3 +304,20 @@ async def test_run_orchestrator_strict_mode_blocks_fallback_even_when_allow_flag
     trace = state.get("integration_trace", {})
     assert trace.get("execution_path") == "adk_unavailable"
     assert trace.get("execution_reason") == "missing_or_placeholder_api_key"
+
+
+@pytest.mark.asyncio
+async def test_run_orchestrator_always_sets_trace_invariants(monkeypatch: pytest.MonkeyPatch):
+    import resilix.config.settings as settings_module
+
+    monkeypatch.setenv("USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "your_key")
+    settings_module.get_settings.cache_clear()
+
+    state = await run_orchestrator({"status": "firing", "alerts": []}, "INC-TRACE-001", root_agent=object())
+    trace = state.get("integration_trace", {})
+    assert isinstance(trace.get("execution_path"), str)
+    assert bool(trace.get("execution_path"))
+    assert isinstance(trace.get("execution_reason"), str)
+    assert bool(trace.get("execution_reason"))
+    assert trace.get("runner_policy") == "adk_only"
