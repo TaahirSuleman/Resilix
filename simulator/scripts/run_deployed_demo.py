@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,65 @@ def _fetch_json(client: httpx.Client, url: str) -> dict[str, Any]:
     return response.json()
 
 
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _recover_incident_id_after_trigger_timeout(
+    *,
+    client: httpx.Client,
+    base_url: str,
+    payload: dict[str, Any],
+    not_before: datetime,
+    wait_seconds: float,
+    interval_seconds: float,
+) -> str | None:
+    alerts = payload.get("alerts") if isinstance(payload, dict) else None
+    first_alert = alerts[0] if isinstance(alerts, list) and alerts and isinstance(alerts[0], dict) else {}
+    labels = first_alert.get("labels") if isinstance(first_alert.get("labels"), dict) else {}
+    expected_service = str(labels.get("service", "")).strip()
+    expected_severity = str(labels.get("severity", "")).strip().lower()
+    floor = not_before - timedelta(seconds=10)
+    deadline = time.time() + max(1.0, float(wait_seconds))
+
+    while time.time() < deadline:
+        try:
+            listing = _fetch_json(client, f"{base_url}/incidents")
+        except (httpx.ReadTimeout, httpx.HTTPError):
+            time.sleep(max(0.1, interval_seconds))
+            continue
+        items = listing.get("items")
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                incident_id = item.get("incident_id")
+                if not isinstance(incident_id, str) or not incident_id:
+                    continue
+                created_at = _parse_iso_datetime(item.get("created_at"))
+                if created_at is None or created_at < floor:
+                    continue
+                service_name = str(item.get("service_name", "")).strip()
+                severity = str(item.get("severity", "")).strip().lower()
+                if expected_service and service_name != expected_service:
+                    continue
+                if expected_severity and severity != expected_severity:
+                    continue
+                return incident_id
+        time.sleep(max(0.1, interval_seconds))
+
+    return None
+
+
 def _validate_health_preflight(health: dict[str, Any]) -> None:
     if health.get("status") != "ok":
         raise RuntimeError("Health status is not ok")
@@ -63,6 +122,21 @@ def _write_summary(path: Path, lines: list[str]) -> None:
 
 
 def _failure_reason(detail: dict[str, Any]) -> str:
+    status = str(detail.get("status", "unknown"))
+    if status == "processing":
+        pr_status = str(detail.get("pr_status", ""))
+        approval_status = str(detail.get("approval_status", ""))
+        trace = detail.get("integration_trace") if isinstance(detail.get("integration_trace"), dict) else {}
+        gate = trace.get("gate_details") if isinstance(trace.get("gate_details"), dict) else {}
+        if pr_status == "pending_ci":
+            return (
+                "merge_gate_blocked:ci_pending"
+                f" (ci_state={gate.get('ci_state')},"
+                f" mergeable_state={gate.get('mergeable_state')},"
+                f" review_decision={gate.get('review_decision')},"
+                f" has_approved_review={gate.get('has_approved_review')},"
+                f" approval_status={approval_status})"
+            )
     integration_trace = detail.get("integration_trace") or {}
     remediation = detail.get("remediation_result") or {}
     candidates = [
@@ -221,23 +295,65 @@ def main() -> None:
             attempt_root.mkdir(parents=True, exist_ok=True)
 
             trigger_resp = None
+            accepted: dict[str, Any] | None = None
             attempts = max(1, int(args.trigger_retries))
             for trigger_attempt in range(1, attempts + 1):
+                trigger_started_at = datetime.now(timezone.utc)
                 try:
                     trigger_resp = client.post(f"{base_url}/webhook/prometheus", json=payload)
                     trigger_resp.raise_for_status()
+                    accepted = trigger_resp.json()
                     break
                 except httpx.ReadTimeout:
+                    recovery_wait_seconds = max(
+                        60.0,
+                        min(float(args.timeout), max(float(args.request_timeout) * 2.0, 300.0)),
+                    )
+                    recovered_incident_id = _recover_incident_id_after_trigger_timeout(
+                        client=client,
+                        base_url=base_url,
+                        payload=payload,
+                        not_before=trigger_started_at,
+                        wait_seconds=recovery_wait_seconds,
+                        interval_seconds=max(0.5, args.interval),
+                    )
+                    if recovered_incident_id:
+                        accepted = {
+                            "status": "accepted",
+                            "incident_id": recovered_incident_id,
+                            "recovered_via": "incident_list_lookup_after_trigger_timeout",
+                        }
+                        break
                     if trigger_attempt >= attempts:
                         raise RuntimeError(
                             "Webhook trigger timed out after retries. "
-                            "Increase --request-timeout or verify Cloud Run latency."
+                            "Request likely exceeded synchronous webhook processing window. "
+                            "Increase --request-timeout, reduce model/tool latency, or use more workers."
                         ) from None
                     time.sleep(max(0.0, args.trigger_retry_delay))
 
-            if trigger_resp is None:
+            if accepted is None:
+                # Final recovery pass before failing the run. This helps when the last trigger attempt
+                # timed out but backend completed shortly after.
+                recovered_incident_id = _recover_incident_id_after_trigger_timeout(
+                    client=client,
+                    base_url=base_url,
+                    payload=payload,
+                    not_before=datetime.now(timezone.utc) - timedelta(seconds=120),
+                    wait_seconds=max(60.0, float(args.timeout)),
+                    interval_seconds=max(0.5, args.interval),
+                )
+                if recovered_incident_id:
+                    accepted = {
+                        "status": "accepted",
+                        "incident_id": recovered_incident_id,
+                        "recovered_via": "final_incident_list_lookup_after_trigger_timeouts",
+                    }
+
+            if accepted is None and trigger_resp is None:
                 raise RuntimeError("Webhook trigger failed without a response")
-            accepted = trigger_resp.json()
+            if accepted is None:
+                accepted = trigger_resp.json()
             incident_id = accepted.get("incident_id")
             if not isinstance(incident_id, str) or not incident_id:
                 raise RuntimeError("Webhook response did not include incident_id")
@@ -266,6 +382,7 @@ def main() -> None:
                         if approve_resp.status_code == 409:
                             block_code = _approval_block_code(approve_resp)
                             if block_code in {"ci_not_passed", "codeowner_review_required"}:
+                                last_failure_reason = f"approval_blocked:{block_code}"
                                 time.sleep(args.interval)
                                 continue
                             raise RuntimeError(f"Approval blocked: {approve_resp.text}")
