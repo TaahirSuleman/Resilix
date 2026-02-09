@@ -72,6 +72,7 @@ class FakeCodeProvider:
         target_file: str,
         action: RecommendedAction,
         summary: str,
+        remediation_context: dict[str, object] | None = None,
     ) -> RemediationResult:
         self.created.append(
             {
@@ -80,6 +81,7 @@ class FakeCodeProvider:
                 "target_file": target_file,
                 "action": action,
                 "summary": summary,
+                "remediation_context": remediation_context,
             }
         )
         return RemediationResult(
@@ -158,6 +160,14 @@ async def test_apply_direct_integrations_overrides_targets(monkeypatch: pytest.M
     signature = result_state["thought_signature"]
     assert signature["target_repository"] == "acme/resilix-demo-config"
     assert signature["target_file"] == "infra/dns/coredns-config.yaml"
+    created = code_provider.created[0]
+    context = created["remediation_context"]
+    assert isinstance(context, dict)
+    assert context["incident_id"] == "INC-TEST001"
+    assert context["service_name"] == "dns-resolver"
+    assert context["target_file"] == "infra/dns/coredns-config.yaml"
+    assert context["root_cause_category"] in {"config_error", "code_bug", "dependency_failure", "resource_exhaustion"}
+    assert context["recommended_action"] in {"config_change", "fix_code", "rollback", "scale_up"}
 
     assert result_state["jira_ticket"]["ticket_key"] == "SRE-00001"
     assert result_state["remediation_result"]["pr_number"] == 123

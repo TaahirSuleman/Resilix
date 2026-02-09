@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from resilix.agents.mechanic import build_mechanic_agent
 from resilix.services.orchestrator import MockRunner
 
 
@@ -38,3 +39,11 @@ async def test_mechanic_receives_signature_and_produces_strategy_aligned_pr(monk
     assert remediation["pr_url"] is not None
     assert remediation["action_taken"] == signature.recommended_action.value
     assert mechanic_trace["strategy"] == signature.root_cause_category.value
+
+
+def test_mechanic_registers_repository_context_tools() -> None:
+    agent = build_mechanic_agent()
+    tool_names = {tool.__name__ for tool in agent.tools}
+    assert "github_list_repositories" in tool_names
+    assert "get_file_contents" in tool_names
+    assert "search_code" in tool_names

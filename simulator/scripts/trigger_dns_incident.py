@@ -3,35 +3,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
 import httpx
 
-DEFAULT_TARGET_FILE = "infra/dns/coredns-config.yaml"
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-
-def _resolve_base_url(value: str | None) -> str:
-    base_url = value or os.getenv("RESILIX_BASE_URL") or os.getenv("BASE_URL")
-    if not base_url:
-        raise SystemExit("Base URL is required via --base-url, RESILIX_BASE_URL, or BASE_URL")
-    return base_url.rstrip("/")
-
-
-def _resolve_repository(value: str | None) -> str:
-    repository = value or os.getenv("RESILIX_TARGET_REPOSITORY")
-    if not repository:
-        owner = os.getenv("GITHUB_OWNER")
-        if owner:
-            repository = f"{owner}/resilix"
-    if not repository:
-        raise SystemExit("Repository is required via --repository, RESILIX_TARGET_REPOSITORY, or GITHUB_OWNER")
-    return repository
-
-
-def _resolve_target_file(value: str | None) -> str:
-    return value or os.getenv("RESILIX_TARGET_FILE") or DEFAULT_TARGET_FILE
+from simulator.scripts.common import (
+    ensure_non_placeholder_repository,
+    resolve_base_url,
+    resolve_repository_for_scenario,
+    resolve_target_file,
+)
 
 
 def _load_payload(fixture_path: Path) -> dict:
@@ -60,9 +46,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    base_url = _resolve_base_url(args.base_url)
-    repository = _resolve_repository(args.repository)
-    target_file = _resolve_target_file(args.target_file)
+    base_url = resolve_base_url(args.base_url)
+    repository = resolve_repository_for_scenario(
+        scenario_name="flapping",
+        explicit_repository=args.repository,
+    )
+    ensure_non_placeholder_repository(repository)
+    target_file = resolve_target_file(args.target_file)
 
     fixture_path = Path(args.fixture)
     if not fixture_path.exists():

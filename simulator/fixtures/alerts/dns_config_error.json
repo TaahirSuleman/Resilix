@@ -3,7 +3,7 @@
   "groupKey": "dns-config-error",
   "status": "firing",
   "receiver": "resilix",
-  "repository": "PLACEHOLDER_OWNER/resilix",
+  "repository": "PLACEHOLDER_OWNER/resilix-demo-config",
   "target_file": "infra/dns/coredns-config.yaml",
   "alerts": [
     {

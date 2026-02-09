@@ -43,3 +43,6 @@ frontend/dist/
 frontend/.vite/
 frontend/.env.local
 frontend/*.log
+
+# Simulator artifacts
+simulator/artifacts/

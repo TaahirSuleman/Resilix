@@ -196,13 +196,31 @@ Optional env vars:
 - `RESILIX_BASE_URL`
 - `RESILIX_TARGET_REPOSITORY`
 - `RESILIX_TARGET_FILE`
+- `RESILIX_DEMO_APP_REPO` (default `PLACEHOLDER_OWNER/resilix-demo-app`)
+- `RESILIX_DEMO_CONFIG_REPO` (default `PLACEHOLDER_OWNER/resilix-demo-config`)
 
 Example:
 ```bash
 python simulator/scripts/run_dns_demo.py --base-url http://localhost:8080
 ```
 
-By default, the simulator targets `${GITHUB_OWNER}/resilix`. Override with `RESILIX_TARGET_REPOSITORY` or `--repository` if needed.
+By default, simulator scenarios target demo repos:
+- `baseline` -> `${GITHUB_OWNER}/resilix-demo-app`
+- `flapping` / `dependency_timeout` -> `${GITHUB_OWNER}/resilix-demo-config`
+
+Run one full deployed demo with artifact capture:
+```bash
+python simulator/scripts/run_deployed_demo.py --base-url "$BASE_URL" --scenario flapping
+```
+
+Verify Jira/GitHub side effects for an existing incident:
+```bash
+python simulator/scripts/verify_external_side_effects.py --base-url "$BASE_URL" --incident-id INC-XXXX
+```
+
+Runbook and recording checklist:
+- `simulator/RUNBOOK.md`
+- `simulator/RECORDING_CHECKLIST.md`
 
 ## Project Structure
 

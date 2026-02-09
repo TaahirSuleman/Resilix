@@ -51,6 +51,7 @@ class MockCodeProvider:
         target_file: str,
         action: RecommendedAction,
         summary: str,
+        remediation_context: dict[str, object] | None = None,
     ) -> RemediationResult:
         pr_number = (crc32(incident_id.encode("utf-8")) % 9000) + 1000
         return RemediationResult(
