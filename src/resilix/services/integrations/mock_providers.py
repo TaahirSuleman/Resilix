@@ -61,6 +61,9 @@ class MockCodeProvider:
             pr_number=pr_number,
             pr_url=f"https://github.com/{repository}/pull/{pr_number}",
             pr_merged=False,
+            target_file=target_file,
+            diff_old_line=None,
+            diff_new_line=f"# mock remediation preview for {action.value}",
             execution_time_seconds=1.0,
         )
 

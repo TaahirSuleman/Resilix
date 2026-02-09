@@ -31,6 +31,9 @@ class RemediationResult(BaseModel):
     pr_number: Optional[int] = None
     pr_url: Optional[str] = None
     pr_merged: bool = False
+    target_file: Optional[str] = None
+    diff_old_line: Optional[str] = None
+    diff_new_line: Optional[str] = None
 
     execution_time_seconds: float
     error_message: Optional[str] = None
@@ -56,5 +59,8 @@ class RemediationResultPayload(BaseModel):
     pr_number: Optional[int] = None
     pr_url: Optional[str] = None
     pr_merged: bool = False
+    target_file: Optional[str] = None
+    diff_old_line: Optional[str] = None
+    diff_new_line: Optional[str] = None
     execution_time_seconds: float
     error_message: Optional[str] = None
