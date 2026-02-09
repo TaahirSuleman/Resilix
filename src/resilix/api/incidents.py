@@ -39,12 +39,10 @@ def _emit_simulation_recovery_log(*, incident_id: str, state: dict) -> None:
     target_file = str(thought_signature.get("target_file") or "")
     recommended_action = str(thought_signature.get("recommended_action") or "")
 
-    logger.info(
-        "Simulated recovery verified",
+    logger.error(
+        "Recovery verification signal",
         incident_id=incident_id,
         recovery_event="SimulatedRecoveryVerified",
-        simulation_source=simulation_context["source"],
-        simulation_scenario=simulation_context["scenario"],
         pre_failure_mode="dns_flapping_backlog_cascade",
         post_state="stable",
         repository=repository,

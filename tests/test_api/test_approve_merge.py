@@ -149,7 +149,7 @@ async def test_approve_merge_emits_simulation_recovery_log(
     calls: list[tuple[str, dict[str, Any]]] = []
 
     class _CaptureLogger:
-        def info(self, message: str, **kwargs: Any) -> None:
+        def error(self, message: str, **kwargs: Any) -> None:
             calls.append((message, kwargs))
 
         def warning(self, message: str, **kwargs: Any) -> None:
@@ -164,7 +164,10 @@ async def test_approve_merge_emits_simulation_recovery_log(
     approve_response = await test_client.post(f"/incidents/{incident_id}/approve-merge")
     assert approve_response.status_code == 200
     messages = [message for message, _ in calls]
-    assert "Simulated recovery verified" in messages
+    assert "Recovery verification signal" in messages
+    for _, fields in calls:
+        assert "simulation_source" not in fields
+        assert "simulation_scenario" not in fields
 
 
 @pytest.mark.asyncio
@@ -175,7 +178,7 @@ async def test_approve_merge_skips_simulation_recovery_log_for_non_simulation_pa
     calls: list[tuple[str, dict[str, Any]]] = []
 
     class _CaptureLogger:
-        def info(self, message: str, **kwargs: Any) -> None:
+        def error(self, message: str, **kwargs: Any) -> None:
             calls.append((message, kwargs))
 
         def warning(self, message: str, **kwargs: Any) -> None:
@@ -188,4 +191,4 @@ async def test_approve_merge_skips_simulation_recovery_log_for_non_simulation_pa
     approve_response = await test_client.post(f"/incidents/{incident_id}/approve-merge")
     assert approve_response.status_code == 200
     messages = [message for message, _ in calls]
-    assert "Simulated recovery verified" not in messages
+    assert "Recovery verification signal" not in messages

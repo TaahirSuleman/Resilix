@@ -114,7 +114,7 @@ async def test_webhook_simulation_payload_emits_cascade_logs(
     calls: list[tuple[str, dict[str, Any]]] = []
 
     class _CaptureLogger:
-        def info(self, *args: Any, **kwargs: Any) -> None:
+        def error(self, *args: Any, **kwargs: Any) -> None:
             message = str(args[0]) if args else ""
             calls.append((message, kwargs))
 
@@ -152,8 +152,13 @@ async def test_webhook_simulation_payload_emits_cascade_logs(
     response = await test_client.post("/webhook/prometheus", json=payload)
     assert response.status_code == 200
     messages = [message for message, _ in calls]
-    assert "Simulation cascade payload received" in messages
-    assert "Simulation cascade log" in messages
+    assert "DNS cascade payload received" in messages
+    assert "DNS cascade signal" in messages
+    for _, fields in calls:
+        assert "simulation_source" not in fields
+        assert "simulation_scenario" not in fields
+        assert "simulation_seed" not in fields
+        assert "simulation_generated_at" not in fields
 
 
 @pytest.mark.asyncio
@@ -164,7 +169,7 @@ async def test_webhook_non_simulation_payload_skips_cascade_logs(
     calls: list[tuple[str, dict[str, Any]]] = []
 
     class _CaptureLogger:
-        def info(self, *args: Any, **kwargs: Any) -> None:
+        def error(self, *args: Any, **kwargs: Any) -> None:
             message = str(args[0]) if args else ""
             calls.append((message, kwargs))
 
@@ -194,8 +199,8 @@ async def test_webhook_non_simulation_payload_skips_cascade_logs(
     response = await test_client.post("/webhook/prometheus", json=payload)
     assert response.status_code == 200
     messages = [message for message, _ in calls]
-    assert "Simulation cascade payload received" not in messages
-    assert "Simulation cascade log" not in messages
+    assert "DNS cascade payload received" not in messages
+    assert "DNS cascade signal" not in messages
 
 
 @pytest.mark.asyncio

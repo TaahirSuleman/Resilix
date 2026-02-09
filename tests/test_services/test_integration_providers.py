@@ -30,10 +30,13 @@ class _FakeResponse:
 
 
 class _FakeAsyncClient:
+    _last_instance: "_FakeAsyncClient | None" = None
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
 
     async def __aenter__(self):
+        type(self)._last_instance = self
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -41,6 +44,8 @@ class _FakeAsyncClient:
 
     async def get(self, url: str, **kwargs: Any) -> _FakeResponse:
         self.calls.append(("GET", url, kwargs))
+        if "/board/" in url and url.endswith("/sprint"):
+            return _FakeResponse(200, {"values": [{"id": 77, "state": "active"}]})
         if "/issue/" in url and url.endswith("/transitions"):
             return _FakeResponse(
                 200,
@@ -68,6 +73,8 @@ class _FakeAsyncClient:
 
     async def post(self, url: str, **kwargs: Any) -> _FakeResponse:
         self.calls.append(("POST", url, kwargs))
+        if "/sprint/" in url and url.endswith("/issue"):
+            return _FakeResponse(204, {})
         if url.endswith("/issue"):
             return _FakeResponse(201, {"key": "SRE-101"})
         if url.endswith("/git/refs"):
@@ -110,6 +117,22 @@ data:
         return await super().get(url, **kwargs)
 
 
+class _FakeAsyncClientNoActiveSprint(_FakeAsyncClient):
+    async def get(self, url: str, **kwargs: Any) -> _FakeResponse:
+        if "/board/" in url and url.endswith("/sprint"):
+            self.calls.append(("GET", url, kwargs))
+            return _FakeResponse(200, {"values": []})
+        return await super().get(url, **kwargs)
+
+
+class _FakeAsyncClientSprintAssignFails(_FakeAsyncClient):
+    async def post(self, url: str, **kwargs: Any) -> _FakeResponse:
+        if "/sprint/" in url and url.endswith("/issue"):
+            self.calls.append(("POST", url, kwargs))
+            return _FakeResponse(500, {})
+        return await super().post(url, **kwargs)
+
+
 @pytest.mark.asyncio
 async def test_jira_direct_provider_normalizes_ticket(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
@@ -128,6 +151,112 @@ async def test_jira_direct_provider_normalizes_ticket(monkeypatch: pytest.Monkey
     )
     assert result.ticket_key == "SRE-101"
     assert result.ticket_url.endswith("/browse/SRE-101")
+
+
+@pytest.mark.asyncio
+async def test_jira_direct_provider_adds_ticket_to_active_sprint_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+    provider = JiraDirectProvider(
+        jira_url="https://example.atlassian.net",
+        username="user@example.com",
+        api_token="token",
+        project_key="SRE",
+        issue_type="Bug",
+        board_id=123,
+        add_to_active_sprint=True,
+    )
+    result = await provider.create_incident_ticket(
+        incident_id="INC-001",
+        summary="[AUTO] test issue",
+        description="description",
+        priority="High",
+    )
+    assert result.ticket_key == "SRE-101"
+    client = _FakeAsyncClient._last_instance
+    assert client is not None
+    assert any("/board/123/sprint" in url for method, url, _ in client.calls if method == "GET")
+    assert any("/sprint/77/issue" in url for method, url, _ in client.calls if method == "POST")
+
+
+@pytest.mark.asyncio
+async def test_jira_direct_provider_skips_sprint_assignment_without_board_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+    provider = JiraDirectProvider(
+        jira_url="https://example.atlassian.net",
+        username="user@example.com",
+        api_token="token",
+        project_key="SRE",
+        issue_type="Bug",
+        board_id=None,
+        add_to_active_sprint=True,
+    )
+    await provider.create_incident_ticket(
+        incident_id="INC-001",
+        summary="[AUTO] test issue",
+        description="description",
+        priority="High",
+    )
+    client = _FakeAsyncClient._last_instance
+    assert client is not None
+    assert not any("/board/" in url for method, url, _ in client.calls if method == "GET")
+    assert not any("/sprint/" in url for method, url, _ in client.calls if method == "POST")
+
+
+@pytest.mark.asyncio
+async def test_jira_direct_provider_no_active_sprint_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClientNoActiveSprint)
+    provider = JiraDirectProvider(
+        jira_url="https://example.atlassian.net",
+        username="user@example.com",
+        api_token="token",
+        project_key="SRE",
+        issue_type="Bug",
+        board_id=123,
+        add_to_active_sprint=True,
+    )
+    result = await provider.create_incident_ticket(
+        incident_id="INC-001",
+        summary="[AUTO] test issue",
+        description="description",
+        priority="High",
+    )
+    assert result.ticket_key == "SRE-101"
+    client = _FakeAsyncClientNoActiveSprint._last_instance
+    assert client is not None
+    assert any("/board/123/sprint" in url for method, url, _ in client.calls if method == "GET")
+    assert not any("/sprint/" in url for method, url, _ in client.calls if method == "POST")
+
+
+@pytest.mark.asyncio
+async def test_jira_direct_provider_sprint_assignment_failure_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClientSprintAssignFails)
+    provider = JiraDirectProvider(
+        jira_url="https://example.atlassian.net",
+        username="user@example.com",
+        api_token="token",
+        project_key="SRE",
+        issue_type="Bug",
+        board_id=123,
+        add_to_active_sprint=True,
+    )
+    result = await provider.create_incident_ticket(
+        incident_id="INC-001",
+        summary="[AUTO] test issue",
+        description="description",
+        priority="High",
+    )
+    assert result.ticket_key == "SRE-101"
+    client = _FakeAsyncClientSprintAssignFails._last_instance
+    assert client is not None
+    assert any("/sprint/77/issue" in url for method, url, _ in client.calls if method == "POST")
 
 
 @pytest.mark.asyncio

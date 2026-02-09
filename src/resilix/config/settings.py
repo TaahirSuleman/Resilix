@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     jira_status_done: str = "Done"
     jira_transition_strict: bool = False
     jira_transition_aliases: str = ""
+    jira_board_id: Optional[int] = None
+    jira_add_to_active_sprint: bool = True
 
     # Logging
     log_level: str = "INFO"

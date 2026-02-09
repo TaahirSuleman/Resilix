@@ -5,8 +5,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+import structlog
 
 from resilix.models.remediation import JiraTicketResult
+
+logger = structlog.get_logger(__name__)
 
 
 class JiraDirectProvider:
@@ -20,6 +23,8 @@ class JiraDirectProvider:
         issue_type: str,
         transition_strict: bool = False,
         transition_aliases: str = "",
+        board_id: int | None = None,
+        add_to_active_sprint: bool = True,
         timeout_seconds: float = 15.0,
     ) -> None:
         self._jira_url = jira_url.rstrip("/")
@@ -29,6 +34,8 @@ class JiraDirectProvider:
         self._issue_type = issue_type
         self._transition_strict = transition_strict
         self._transition_aliases = self._parse_aliases(transition_aliases)
+        self._board_id = board_id
+        self._add_to_active_sprint = add_to_active_sprint
         self._timeout_seconds = timeout_seconds
 
     async def create_incident_ticket(
@@ -70,6 +77,7 @@ class JiraDirectProvider:
         response.raise_for_status()
         data: dict[str, Any] = response.json()
         ticket_key = str(data.get("key", "UNKNOWN-0"))
+        await self._maybe_add_to_active_sprint(ticket_key=ticket_key)
         return JiraTicketResult(
             ticket_key=ticket_key,
             ticket_url=f"{self._jira_url}/browse/{ticket_key}",
@@ -78,6 +86,65 @@ class JiraDirectProvider:
             status="Open",
             created_at=datetime.now(timezone.utc),
         )
+
+    async def _maybe_add_to_active_sprint(self, *, ticket_key: str) -> None:
+        if not self._add_to_active_sprint or self._board_id is None:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+                sprint_id = await self._resolve_active_sprint_id(client=client, board_id=self._board_id)
+                if sprint_id is None:
+                    return
+                await self._add_issue_to_sprint(client=client, sprint_id=sprint_id, ticket_key=ticket_key)
+        except Exception as exc:
+            logger.warning(
+                "Jira active sprint assignment failed",
+                ticket_key=ticket_key,
+                board_id=self._board_id,
+                error=str(exc),
+            )
+
+    async def _resolve_active_sprint_id(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        board_id: int,
+    ) -> int | None:
+        endpoint = f"{self._jira_url}/rest/agile/1.0/board/{board_id}/sprint"
+        response = await client.get(
+            endpoint,
+            auth=(self._username, self._api_token),
+            headers={"Accept": "application/json"},
+            params={"state": "active"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        values = payload.get("values") if isinstance(payload, dict) else None
+        if not isinstance(values, list):
+            return None
+        for sprint in values:
+            if not isinstance(sprint, dict):
+                continue
+            sprint_id = sprint.get("id")
+            if isinstance(sprint_id, int):
+                return sprint_id
+        return None
+
+    async def _add_issue_to_sprint(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        sprint_id: int,
+        ticket_key: str,
+    ) -> None:
+        endpoint = f"{self._jira_url}/rest/agile/1.0/sprint/{sprint_id}/issue"
+        response = await client.post(
+            endpoint,
+            auth=(self._username, self._api_token),
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            json={"issues": [ticket_key]},
+        )
+        response.raise_for_status()
 
     async def transition_ticket(
         self,

@@ -50,23 +50,18 @@ def _emit_simulation_cascade_logs(
     log_entries: Any,
 ) -> None:
     entries = log_entries if isinstance(log_entries, list) else []
-    logger.info(
-        "Simulation cascade payload received",
+    logger.error(
+        "DNS cascade payload received",
         incident_id=incident_id,
-        simulation_source=simulation_context.get("source"),
-        simulation_scenario=simulation_context.get("scenario"),
-        simulation_seed=simulation_context.get("seed"),
-        simulation_generated_at=simulation_context.get("generated_at"),
         log_entry_count=len(entries),
     )
     for index, entry in enumerate(entries[:20]):
         if not isinstance(entry, dict):
             continue
         metadata = entry.get("metadata")
-        logger.info(
-            "Simulation cascade log",
+        logger.error(
+            "DNS cascade signal",
             incident_id=incident_id,
-            simulation_scenario=simulation_context.get("scenario"),
             sequence=index,
             cascade_event=str(entry.get("event", "")),
             service=str(entry.get("service", "")),

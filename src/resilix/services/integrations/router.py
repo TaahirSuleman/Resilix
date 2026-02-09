@@ -79,6 +79,8 @@ def get_ticket_provider() -> tuple[TicketProvider, str]:
         issue_type=settings.jira_issue_type,
         transition_strict=settings.jira_transition_strict,
         transition_aliases=settings.jira_transition_aliases,
+        board_id=settings.jira_board_id,
+        add_to_active_sprint=settings.jira_add_to_active_sprint,
     )
     return provider, "jira_api"
 
