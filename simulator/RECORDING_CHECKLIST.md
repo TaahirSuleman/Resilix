@@ -17,16 +17,22 @@
 1. Show problem statement and live system health.
 2. Trigger incident from terminal:
    - `python simulator/scripts/run_deployed_demo.py --base-url "$BASE_URL" --scenario flapping`
-3. On frontend, show lifecycle progression:
+3. In Cloud Run logs, filter by incident id and show pre-remediation cascade logs:
+   - `"Simulation cascade payload received"`
+   - `"Simulation cascade log"`
+4. On frontend, show lifecycle progression:
    - `processing -> awaiting_approval -> resolved`
-4. Show Jira transitions:
+5. Show Jira transitions:
    - `To Do -> In Progress -> In Review -> Done`
-5. Show GitHub PR lifecycle:
+6. Show GitHub PR lifecycle:
    - branch/commit/PR, then merged.
-6. Show artifact bundle and `summary.md`.
+7. Return to Cloud Run logs and show post-remediation marker:
+   - `"Simulated recovery verified"`
+8. Show artifact bundle and `summary.md`.
 
 ## Must-Capture Evidence
 - Incident ID in terminal output.
+- Cloud Run log lines for simulated cascade and simulated recovery.
 - Timeline events in frontend.
 - Jira ticket key and final status.
 - GitHub PR number and merged state.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import b64encode
 from typing import Any
 
 import pytest
@@ -80,6 +81,33 @@ class _FakeAsyncClient:
         if url.endswith("/merge"):
             return _FakeResponse(200, {"merged": True})
         return _FakeResponse(201, {"content": {"sha": "def456"}})
+
+
+class _FakeAsyncClientWithDnsContent(_FakeAsyncClient):
+    async def get(self, url: str, **kwargs: Any) -> _FakeResponse:
+        self.calls.append(("GET", url, kwargs))
+        if "/git/ref/heads/" in url:
+            return _FakeResponse(200, {"object": {"sha": "abc123"}})
+        if "/contents/infra/dns/coredns-config.yaml" in url:
+            source = """apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-config
+data:
+  Corefile: |
+    .:53 {
+        errors
+        forward . 10.0.0.1:53
+        cache 30
+    }
+  failover_mode: "DISABLED_MANUAL"
+"""
+            content_b64 = b64encode(source.encode("utf-8")).decode("utf-8")
+            return _FakeResponse(
+                200,
+                {"sha": "file-sha", "encoding": "base64", "content": content_b64},
+            )
+        return await super().get(url, **kwargs)
 
 
 @pytest.mark.asyncio
@@ -166,6 +194,28 @@ async def test_github_direct_provider_normalizes_pr_and_merge_gate(monkeypatch: 
     gate = await provider.get_merge_gate_status(repository="owner/resilix-demo-app", pr_number=42)
     assert gate.ci_passed is True
     assert gate.codeowner_reviewed is True
+
+
+@pytest.mark.asyncio
+async def test_github_direct_provider_returns_diff_preview_for_dns_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClientWithDnsContent)
+    provider = GithubDirectProvider(token="token", owner="owner", default_base_branch="main")
+
+    remediation = await provider.create_remediation_pr(
+        incident_id="INC-003",
+        repository="owner/resilix-demo-config",
+        target_file="infra/dns/coredns-config.yaml",
+        action=RecommendedAction.CONFIG_CHANGE,
+        summary="dns fix",
+    )
+
+    assert remediation.target_file == "infra/dns/coredns-config.yaml"
+    assert remediation.diff_old_line is not None
+    assert remediation.diff_new_line is not None
+    assert "forward . 10.0.0.1:53" in remediation.diff_old_line
+    assert "forward . 1.1.1.1 8.8.8.8 9.9.9.9" in remediation.diff_new_line
 
 
 def test_router_raises_in_api_mode_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -302,3 +352,13 @@ def test_github_direct_unknown_target_falls_back() -> None:
         remediation_context={},
     )
     assert patched is None
+
+
+def test_github_direct_default_preview_for_dns_target() -> None:
+    provider = GithubDirectProvider(token="token", owner="owner", default_base_branch="main")
+    old_line, new_line = provider._default_preview_for_target(
+        target_file="infra/dns/coredns-config.yaml",
+        action=RecommendedAction.CONFIG_CHANGE,
+    )
+    assert old_line == "forward . 10.0.0.1:53"
+    assert new_line == "forward . 1.1.1.1 8.8.8.8 9.9.9.9"

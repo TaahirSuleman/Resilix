@@ -111,6 +111,41 @@ class GithubDirectProvider:
         return None
 
     @staticmethod
+    def _extract_diff_preview(
+        *,
+        old_content: str,
+        new_content: str,
+    ) -> tuple[str | None, str | None]:
+        old_lines = old_content.splitlines()
+        new_lines = new_content.splitlines()
+        for idx in range(max(len(old_lines), len(new_lines))):
+            old_line = old_lines[idx] if idx < len(old_lines) else None
+            new_line = new_lines[idx] if idx < len(new_lines) else None
+            if old_line == new_line:
+                continue
+            old_norm = old_line.strip() if isinstance(old_line, str) else ""
+            new_norm = new_line.strip() if isinstance(new_line, str) else ""
+            if not old_norm and not new_norm:
+                continue
+            return old_line, new_line
+        return None, None
+
+    @staticmethod
+    def _default_preview_for_target(
+        *,
+        target_file: str,
+        action: RecommendedAction,
+    ) -> tuple[str | None, str | None]:
+        normalized = target_file.strip().lower().lstrip("/")
+        if normalized.endswith("infra/dns/coredns-config.yaml"):
+            return ("forward . 10.0.0.1:53", "forward . 1.1.1.1 8.8.8.8 9.9.9.9")
+        if normalized.endswith("infra/dependencies.yaml"):
+            return ("timeout_ms: 9000", "timeout_ms: 1500")
+        if normalized.endswith("src/app/handlers.py"):
+            return ('requests.get("https://example.com")', "_resilix_safe_http_call(requests.get, ...)")
+        return (None, f"# remediation: {action.value}")
+
+    @staticmethod
     def _patch_coredns_config(content: str) -> str | None:
         if not content:
             return None
@@ -301,11 +336,23 @@ def _resilix_safe_http_call(http_fn, *args, **kwargs):
                 summary=summary,
                 remediation_context=remediation_context,
             )
+            diff_old_line: str | None = None
+            diff_new_line: str | None = None
             file_content = patched_content or self._legacy_remediation_content(
                 incident_id=incident_id,
                 action=action,
                 summary=summary,
             )
+            if patched_content is not None:
+                diff_old_line, diff_new_line = self._extract_diff_preview(
+                    old_content=existing_content,
+                    new_content=file_content,
+                )
+            if not diff_new_line:
+                diff_old_line, diff_new_line = self._default_preview_for_target(
+                    target_file=target_file_path,
+                    action=action,
+                )
             content_b64 = b64encode(file_content.encode("utf-8")).decode("utf-8")
             put_payload: dict[str, Any] = {
                 "message": f"fix: {summary[:72]}",
@@ -356,6 +403,9 @@ def _resilix_safe_http_call(http_fn, *args, **kwargs):
             pr_number=pr_number,
             pr_url=pr_url,
             pr_merged=False,
+            target_file=target_file_path,
+            diff_old_line=diff_old_line,
+            diff_new_line=diff_new_line,
             execution_time_seconds=1.0,
         )
 

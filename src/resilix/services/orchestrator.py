@@ -414,6 +414,9 @@ def _normalize_adk_remediation(value: Any) -> RemediationResult | None:
         "pr_number": value.get("pr_number"),
         "pr_url": value.get("pr_url"),
         "pr_merged": bool(value.get("pr_merged", False)),
+        "target_file": value.get("target_file"),
+        "diff_old_line": value.get("diff_old_line"),
+        "diff_new_line": value.get("diff_new_line"),
         "execution_time_seconds": exec_seconds,
         "error_message": value.get("error_message"),
     }
@@ -444,7 +447,7 @@ def _build_evidence_chain(raw_alert: Dict[str, Any], service_name: str) -> list[
     evidence_chain: list[Evidence] = []
     log_entries = raw_alert.get("log_entries")
     if isinstance(log_entries, list) and log_entries:
-        for entry in log_entries[:3]:
+        for entry in log_entries[:5]:
             if not isinstance(entry, dict):
                 continue
             evidence_chain.append(
@@ -588,6 +591,29 @@ async def apply_direct_integrations(
         signature_model = signature_model.model_copy(update={"target_repository": str(override_repository)})
     if override_target_file:
         signature_model = signature_model.model_copy(update={"target_file": str(override_target_file)})
+
+    # Demo guardrail: infra targets should produce config-oriented remediation semantics.
+    guardrail_applied = False
+    guardrail_reason = ""
+    target_file_value = str(signature_model.target_file or "").strip().lstrip("/")
+    if target_file_value.startswith("infra/"):
+        updates: dict[str, Any] = {}
+        if signature_model.root_cause_category != RootCauseCategory.CONFIG_ERROR:
+            updates["root_cause_category"] = RootCauseCategory.CONFIG_ERROR
+        if signature_model.recommended_action != RecommendedAction.CONFIG_CHANGE:
+            updates["recommended_action"] = RecommendedAction.CONFIG_CHANGE
+        if updates:
+            signature_model = signature_model.model_copy(update=updates)
+            guardrail_applied = True
+            guardrail_reason = "infra_target_forced_config_semantics"
+
+    trace["action_guardrail"] = {
+        "applied": guardrail_applied,
+        "reason": guardrail_reason,
+        "target_file": target_file_value,
+        "root_cause_category": signature_model.root_cause_category.value,
+        "recommended_action": signature_model.recommended_action.value,
+    }
     state["thought_signature"] = signature_model.model_dump()
 
     severity = validated_model.severity
@@ -635,13 +661,6 @@ async def apply_direct_integrations(
         target_status=settings.jira_status_in_progress,
         event_type=TimelineEventType.TICKET_MOVED_IN_PROGRESS,
     )
-    await _transition_jira_ticket(
-        state=state,
-        ticket_provider=ticket_provider,
-        jira_ticket=jira_ticket,
-        target_status=settings.jira_status_in_review,
-        event_type=TimelineEventType.TICKET_MOVED_IN_REVIEW,
-    )
 
     try:
         remediation_context: dict[str, object] = {
@@ -680,6 +699,15 @@ async def apply_direct_integrations(
 
     state["jira_ticket"] = getattr(jira_ticket, "model_dump", lambda: jira_ticket)()
     state["remediation_result"] = remediation.model_dump()
+
+    if remediation.pr_number or remediation.pr_url:
+        await _transition_jira_ticket(
+            state=state,
+            ticket_provider=ticket_provider,
+            jira_ticket=jira_ticket,
+            target_status=settings.jira_status_in_review,
+            event_type=TimelineEventType.TICKET_MOVED_IN_REVIEW,
+        )
 
     gate_status = None
     if remediation.pr_number and signature_model.target_repository:

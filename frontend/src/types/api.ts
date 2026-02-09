@@ -74,6 +74,9 @@ export interface RemediationResult {
   pr_number?: number | null
   pr_url?: string | null
   pr_merged: boolean
+  target_file?: string | null
+  diff_old_line?: string | null
+  diff_new_line?: string | null
   execution_time_seconds: number
   error_message?: string | null
 }

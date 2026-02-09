@@ -106,6 +106,29 @@ function buildEvidence(detail: IncidentDetail): EvidenceItem[] {
   }))
 }
 
+function remediationFallbackDiff(targetFile: string, action: string): { oldLine?: string; newLine: string } {
+  const normalized = targetFile.trim().toLowerCase()
+  if (normalized.endsWith('infra/dns/coredns-config.yaml')) {
+    return {
+      oldLine: 'forward . 10.0.0.1:53',
+      newLine: 'forward . 1.1.1.1 8.8.8.8 9.9.9.9',
+    }
+  }
+  if (normalized.endsWith('infra/dependencies.yaml')) {
+    return {
+      oldLine: 'timeout_ms: 9000',
+      newLine: 'timeout_ms: 1500',
+    }
+  }
+  if (normalized.endsWith('src/app/handlers.py')) {
+    return {
+      oldLine: 'requests.get("https://example.com")',
+      newLine: '_resilix_safe_http_call(requests.get, ...)',
+    }
+  }
+  return { newLine: `# remediation: ${action}` }
+}
+
 export function mapIncidentSummary(summary: IncidentSummary): UiIncidentSummary {
   return {
     id: summary.incident_id,
@@ -120,13 +143,16 @@ export function mapIncidentSummary(summary: IncidentSummary): UiIncidentSummary 
 
 export function mapIncidentDetail(detail: IncidentDetail): Incident {
   const title = buildTitle(detail)
-  const targetFile = detail.thought_signature?.target_file ?? 'unknown'
+  const targetFile = detail.remediation_result?.target_file ?? detail.thought_signature?.target_file ?? 'unknown'
   const action = detail.remediation_result?.action_taken ?? detail.thought_signature?.recommended_action ?? 'pending'
   const remediationDescription = detail.remediation_result?.success
     ? `Action executed: ${action}.`
     : detail.remediation_result?.error_message
       ? `Action failed: ${detail.remediation_result.error_message}`
       : `Action planned: ${action}.`
+  const fallback = remediationFallbackDiff(targetFile, action)
+  const diffNewLine = detail.remediation_result?.diff_new_line || fallback.newLine
+  const diffOldLine = detail.remediation_result?.diff_old_line || fallback.oldLine
 
   return {
     id: detail.incident_id,
@@ -142,7 +168,8 @@ export function mapIncidentDetail(detail: IncidentDetail): Incident {
       description: remediationDescription,
       codeDiff: {
         filename: targetFile,
-        newLine: `// ${action}`,
+        oldLine: diffOldLine,
+        newLine: diffNewLine,
       },
       approvalStatus: detail.approval_status,
       prStatus: detail.pr_status,

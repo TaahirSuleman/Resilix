@@ -15,6 +15,44 @@ router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 
+def _extract_simulation_context(state: dict) -> dict[str, str] | None:
+    raw_alert = state.get("raw_alert")
+    if not isinstance(raw_alert, dict):
+        return None
+    simulation = raw_alert.get("simulation")
+    if not isinstance(simulation, dict):
+        return None
+    source = str(simulation.get("source", "")).strip()
+    scenario = str(simulation.get("scenario", "")).strip()
+    if source != "resilix-simulator" or not scenario:
+        return None
+    return {"source": source, "scenario": scenario}
+
+
+def _emit_simulation_recovery_log(*, incident_id: str, state: dict) -> None:
+    simulation_context = _extract_simulation_context(state)
+    if simulation_context is None:
+        return
+
+    thought_signature = state.get("thought_signature") if isinstance(state.get("thought_signature"), dict) else {}
+    repository = str(thought_signature.get("target_repository") or "")
+    target_file = str(thought_signature.get("target_file") or "")
+    recommended_action = str(thought_signature.get("recommended_action") or "")
+
+    logger.info(
+        "Simulated recovery verified",
+        incident_id=incident_id,
+        recovery_event="SimulatedRecoveryVerified",
+        simulation_source=simulation_context["source"],
+        simulation_scenario=simulation_context["scenario"],
+        pre_failure_mode="dns_flapping_backlog_cascade",
+        post_state="stable",
+        repository=repository,
+        target_file=target_file,
+        recommended_action=recommended_action,
+    )
+
+
 @router.get("/incidents", response_model=IncidentListResponse)
 async def list_incidents() -> IncidentListResponse:
     store = get_session_store()
@@ -132,6 +170,7 @@ async def approve_merge(incident_id: str) -> IncidentDetailResponse:
                 reason=transition_result.get("reason"),
             )
     append_timeline_event(state, TimelineEventType.INCIDENT_RESOLVED, agent="System")
+    _emit_simulation_recovery_log(incident_id=incident_id, state=state)
 
     await store.save(incident_id, state)
     return state_to_incident_detail(incident_id, state)

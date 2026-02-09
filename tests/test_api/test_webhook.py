@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 import resilix.config.settings as settings_module
@@ -102,3 +104,123 @@ async def test_webhook_rejects_when_provider_not_ready(monkeypatch: pytest.Monke
 
     after = await store.list_items()
     assert len(after) == len(before)
+
+
+@pytest.mark.asyncio
+async def test_webhook_simulation_payload_emits_cascade_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    test_client,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _CaptureLogger:
+        def info(self, *args: Any, **kwargs: Any) -> None:
+            message = str(args[0]) if args else ""
+            calls.append((message, kwargs))
+
+    monkeypatch.setattr("resilix.api.webhooks.logger", _CaptureLogger())
+    payload = {
+        "status": "firing",
+        "simulation": {"source": "resilix-simulator", "scenario": "flapping", "seed": 42},
+        "alerts": [
+            {
+                "labels": {
+                    "alertname": "DNSResolverFlapping",
+                    "service": "dns-resolver",
+                    "severity": "critical",
+                }
+            }
+        ],
+        "log_entries": [
+            {
+                "event": "TargetHealthFlapping",
+                "service": "dns-resolver",
+                "component": "HealthCheckSubsystem",
+                "message": "Targets alternating due to backlog",
+                "metadata": {"queue_depth": 230000},
+            },
+            {
+                "event": "DependencyTimeout",
+                "service": "checkout-api",
+                "component": "DnsClient",
+                "message": "DNS dependency timed out",
+                "metadata": {"timeout_ms": 1400},
+            },
+        ],
+    }
+
+    response = await test_client.post("/webhook/prometheus", json=payload)
+    assert response.status_code == 200
+    messages = [message for message, _ in calls]
+    assert "Simulation cascade payload received" in messages
+    assert "Simulation cascade log" in messages
+
+
+@pytest.mark.asyncio
+async def test_webhook_non_simulation_payload_skips_cascade_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    test_client,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _CaptureLogger:
+        def info(self, *args: Any, **kwargs: Any) -> None:
+            message = str(args[0]) if args else ""
+            calls.append((message, kwargs))
+
+    monkeypatch.setattr("resilix.api.webhooks.logger", _CaptureLogger())
+    payload = {
+        "status": "firing",
+        "alerts": [
+            {
+                "labels": {
+                    "alertname": "DNSResolverFlapping",
+                    "service": "dns-resolver",
+                    "severity": "critical",
+                }
+            }
+        ],
+        "log_entries": [
+            {
+                "event": "TargetHealthFlapping",
+                "service": "dns-resolver",
+                "component": "HealthCheckSubsystem",
+                "message": "Targets alternating due to backlog",
+                "metadata": {"queue_depth": 230000},
+            }
+        ],
+    }
+
+    response = await test_client.post("/webhook/prometheus", json=payload)
+    assert response.status_code == 200
+    messages = [message for message, _ in calls]
+    assert "Simulation cascade payload received" not in messages
+    assert "Simulation cascade log" not in messages
+
+
+@pytest.mark.asyncio
+async def test_webhook_infra_target_forces_config_action(test_client) -> None:
+    payload = {
+        "status": "firing",
+        "repository": "acme/resilix-demo-config",
+        "target_file": "infra/dns/coredns-config.yaml",
+        "alerts": [
+            {
+                "labels": {
+                    "alertname": "HighErrorRate",
+                    "service": "dns-resolver",
+                    "severity": "critical",
+                }
+            }
+        ],
+    }
+
+    response = await test_client.post("/webhook/prometheus", json=payload)
+    assert response.status_code == 200
+    incident_id = response.json()["incident_id"]
+
+    detail = await test_client.get(f"/incidents/{incident_id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["thought_signature"]["root_cause_category"] == "config_error"
+    assert body["remediation_result"]["action_taken"] == "config_change"

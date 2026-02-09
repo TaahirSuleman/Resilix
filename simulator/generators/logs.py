@@ -28,9 +28,12 @@ def generate_log_entries(
     entries: list[dict] = []
 
     if profile == "flapping_backlog":
-        for idx, ts in enumerate(_timestamps(start_time, count, 9)):
+        cycle_count = max(2, count)
+        for idx, ts in enumerate(_timestamps(start_time, cycle_count, 9)):
             queue_depth = 220000 + (idx * 60000) + rng.randint(0, 15000)
             unhealthy = 420 + (idx * 70) + rng.randint(0, 40)
+            resolver_timeout_ms = 850 + (idx * 120) + rng.randint(0, 140)
+            downstream_timeout_ms = 1200 + (idx * 180) + rng.randint(0, 150)
             entries.append(
                 {
                     "timestamp": _isoformat(ts),
@@ -40,6 +43,48 @@ def generate_log_entries(
                     "event": "TargetHealthFlapping",
                     "message": "Targets alternating between healthy and unhealthy due to propagation backlog",
                     "metadata": {"queue_depth": queue_depth, "unhealthy_targets_count": unhealthy},
+                }
+            )
+            entries.append(
+                {
+                    "timestamp": _isoformat(ts + timedelta(seconds=2)),
+                    "level": "ERROR",
+                    "service": "coredns",
+                    "component": "ResolverClient",
+                    "event": "ResolverDialTimeout",
+                    "message": "Resolver request timed out; fallback resolver is unavailable in this region",
+                    "metadata": {
+                        "timeout_ms": resolver_timeout_ms,
+                        "resolver": "10.0.0.1:53",
+                    },
+                }
+            )
+            entries.append(
+                {
+                    "timestamp": _isoformat(ts + timedelta(seconds=4)),
+                    "level": "ERROR",
+                    "service": "checkout-api",
+                    "component": "DnsClient",
+                    "event": "DependencyTimeout",
+                    "message": "DNS dependency timed out while resolving upstream service endpoints",
+                    "metadata": {
+                        "timeout_ms": downstream_timeout_ms,
+                        "dependency": "dns-resolver",
+                    },
+                }
+            )
+            entries.append(
+                {
+                    "timestamp": _isoformat(ts + timedelta(seconds=6)),
+                    "level": "WARN",
+                    "service": "edge-router",
+                    "component": "RetryController",
+                    "event": "CircuitBreakerOpen",
+                    "message": "Retry saturation detected after repeated timeout bursts from DNS path",
+                    "metadata": {
+                        "open_circuits": 3 + idx,
+                        "error_class": "DependencyTimeout",
+                    },
                 }
             )
     elif profile == "backlog_growth":

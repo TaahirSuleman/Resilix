@@ -26,6 +26,7 @@ from simulator.scripts.common import (
     resolve_base_url,
     resolve_repository_for_scenario,
     resolve_target_file,
+    stamp_simulation_payload,
 )
 from simulator.scripts.verify_external_side_effects import verify_external_side_effects
 
@@ -273,6 +274,7 @@ def main() -> None:
     )
     payload["repository"] = repository
     payload["target_file"] = target_file
+    stamp_simulation_payload(payload, scenario_name=args.scenario, seed=args.seed)
 
     run_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     artifact_root = Path(args.artifacts_dir) / f"{run_stamp}_{args.scenario}"

@@ -33,6 +33,21 @@ python simulator/scripts/run_deployed_demo.py \
   --expected-merge-method squash
 ```
 
+## Cloud Run Log Walkthrough
+1. Capture incident id from script output.
+2. Show pre-remediation cascade markers:
+```bash
+gcloud logging read \
+  "resource.type=cloud_run_revision AND jsonPayload.incident_id=\"INC-XXXX\" AND (jsonPayload.message=\"Simulation cascade payload received\" OR jsonPayload.message=\"Simulation cascade log\")" \
+  --limit=50 --format=json
+```
+3. Show post-remediation recovery marker:
+```bash
+gcloud logging read \
+  "resource.type=cloud_run_revision AND jsonPayload.incident_id=\"INC-XXXX\" AND jsonPayload.message=\"Simulated recovery verified\"" \
+  --limit=10 --format=json
+```
+
 ## Expected Output
 - Script exits with status `0`.
 - Artifact bundle is generated:
