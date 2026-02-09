@@ -67,6 +67,7 @@ class CodeProvider(Protocol):
         target_file: str,
         action: RecommendedAction,
         summary: str,
+        remediation_context: dict[str, object] | None = None,
     ) -> RemediationResult: ...
 
     async def get_merge_gate_status(self, *, repository: str, pr_number: int) -> MergeGateStatus: ...

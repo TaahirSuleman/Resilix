@@ -644,12 +644,23 @@ async def apply_direct_integrations(
     )
 
     try:
+        remediation_context: dict[str, object] = {
+            "incident_id": incident_id,
+            "service_name": service_name,
+            "root_cause_category": signature_model.root_cause_category.value,
+            "recommended_action": signature_model.recommended_action.value,
+            "target_file": signature_model.target_file or "",
+            "related_commits": list(signature_model.related_commits),
+            "investigation_summary": signature_model.investigation_summary,
+            "confidence_score": float(signature_model.confidence_score),
+        }
         remediation = await code_provider.create_remediation_pr(
             incident_id=incident_id,
             repository=signature_model.target_repository or "PLACEHOLDER_OWNER/resilix-demo-app",
             target_file=signature_model.target_file or "README.md",
             action=signature_model.recommended_action,
             summary=signature_model.root_cause,
+            remediation_context=remediation_context,
         )
         if remediation.pr_number or remediation.pr_url:
             append_timeline_event(state, TimelineEventType.PR_CREATED, agent="Mechanic")
