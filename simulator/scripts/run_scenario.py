@@ -18,6 +18,7 @@ from simulator.scripts.common import (
     resolve_base_url,
     resolve_repository_for_scenario,
     resolve_target_file,
+    stamp_simulation_payload,
 )
 
 
@@ -58,6 +59,7 @@ def main() -> None:
     )
     payload["repository"] = repository
     payload["target_file"] = target_file
+    stamp_simulation_payload(payload, scenario_name=args.scenario, seed=args.seed)
 
     print(f"Base URL: {base_url}")
     print(f"Repository: {repository}")

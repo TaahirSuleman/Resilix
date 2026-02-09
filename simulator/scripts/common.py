@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 from typing import Literal
@@ -79,3 +80,19 @@ def ensure_fixture_exists(path_value: str) -> Path:
     if not path.exists():
         raise SystemExit(f"Fixture not found: {path}")
     return path
+
+
+def stamp_simulation_payload(
+    payload: dict,
+    *,
+    scenario_name: str,
+    seed: int,
+    source: str = "resilix-simulator",
+) -> dict:
+    payload["simulation"] = {
+        "source": source,
+        "scenario": scenario_name,
+        "seed": seed,
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    return payload

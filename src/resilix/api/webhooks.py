@@ -6,6 +6,7 @@ from typing import Any, Dict
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
+import structlog
 
 from resilix.agent import get_root_agent
 from resilix.config import get_settings
@@ -16,6 +17,7 @@ from resilix.services.orchestrator import get_adk_runtime_status, run_orchestrat
 from resilix.services.session import get_session_store
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 def _validate_prometheus_payload(payload: Dict[str, Any]) -> None:
@@ -23,6 +25,55 @@ def _validate_prometheus_payload(payload: Dict[str, Any]) -> None:
         raise HTTPException(status_code=400, detail="Invalid payload")
     if "alerts" not in payload and "status" not in payload:
         raise HTTPException(status_code=400, detail="Missing alerts/status in payload")
+
+
+def _extract_simulation_context(payload: Dict[str, Any]) -> dict[str, Any] | None:
+    simulation = payload.get("simulation")
+    if not isinstance(simulation, dict):
+        return None
+    source = str(simulation.get("source", "")).strip()
+    scenario = str(simulation.get("scenario", "")).strip()
+    if source != "resilix-simulator" or not scenario:
+        return None
+    return {
+        "source": source,
+        "scenario": scenario,
+        "seed": simulation.get("seed"),
+        "generated_at": simulation.get("generated_at"),
+    }
+
+
+def _emit_simulation_cascade_logs(
+    *,
+    incident_id: str,
+    simulation_context: dict[str, Any],
+    log_entries: Any,
+) -> None:
+    entries = log_entries if isinstance(log_entries, list) else []
+    logger.info(
+        "Simulation cascade payload received",
+        incident_id=incident_id,
+        simulation_source=simulation_context.get("source"),
+        simulation_scenario=simulation_context.get("scenario"),
+        simulation_seed=simulation_context.get("seed"),
+        simulation_generated_at=simulation_context.get("generated_at"),
+        log_entry_count=len(entries),
+    )
+    for index, entry in enumerate(entries[:20]):
+        if not isinstance(entry, dict):
+            continue
+        metadata = entry.get("metadata")
+        logger.info(
+            "Simulation cascade log",
+            incident_id=incident_id,
+            simulation_scenario=simulation_context.get("scenario"),
+            sequence=index,
+            cascade_event=str(entry.get("event", "")),
+            service=str(entry.get("service", "")),
+            component=str(entry.get("component", "")),
+            message=str(entry.get("message", "")),
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
 
 
 @router.post("/webhook/prometheus")
@@ -68,6 +119,13 @@ async def prometheus_webhook(request: Request) -> Dict[str, Any]:
     incident_id = f"INC-{uuid4().hex[:8]}"
     created_at = datetime.now(timezone.utc).isoformat()
     store = get_session_store()
+    simulation_context = _extract_simulation_context(payload)
+    if simulation_context is not None:
+        _emit_simulation_cascade_logs(
+            incident_id=incident_id,
+            simulation_context=simulation_context,
+            log_entries=payload.get("log_entries"),
+        )
 
     initial_state: Dict[str, Any] = {
         "incident_id": incident_id,
