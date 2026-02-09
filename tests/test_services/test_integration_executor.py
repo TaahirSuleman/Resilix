@@ -180,10 +180,20 @@ async def test_apply_direct_integrations_overrides_targets(monkeypatch: pytest.M
     assert "ticket_moved_in_progress" in timeline_types
     assert "ticket_moved_in_review" in timeline_types
     assert "pr_created" in timeline_types
+    in_progress_index = timeline_types.index("ticket_moved_in_progress")
+    pr_created_index = timeline_types.index("pr_created")
+    in_review_index = timeline_types.index("ticket_moved_in_review")
+    assert in_progress_index < pr_created_index
+    assert pr_created_index < in_review_index
 
     trace = result_state.get("integration_trace")
     assert trace is not None
     assert trace.get("post_processor") == "direct_integrations"
+    guardrail = trace.get("action_guardrail")
+    assert isinstance(guardrail, dict)
+    assert guardrail.get("target_file") == "infra/dns/coredns-config.yaml"
+    assert guardrail.get("root_cause_category") == "config_error"
+    assert guardrail.get("recommended_action") == "config_change"
 
 
 @pytest.mark.asyncio

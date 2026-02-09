@@ -42,6 +42,33 @@ def _config_error_payload() -> dict:
                 "message": "Targets alternating between healthy and unhealthy due to propagation backlog",
                 "metadata": {"queue_depth": 330234, "unhealthy_targets_count": 583},
             },
+            {
+                "timestamp": "2026-02-05T12:38:49Z",
+                "level": "ERROR",
+                "service": "coredns",
+                "component": "ResolverClient",
+                "event": "ResolverDialTimeout",
+                "message": "Resolver request timed out under queue pressure",
+                "metadata": {"timeout_ms": 980, "resolver": "10.0.0.1:53"},
+            },
+            {
+                "timestamp": "2026-02-05T12:38:57Z",
+                "level": "ERROR",
+                "service": "checkout-api",
+                "component": "DnsClient",
+                "event": "DependencyTimeout",
+                "message": "DNS dependency timed out while routing checkout traffic",
+                "metadata": {"timeout_ms": 1460, "dependency": "dns-resolver"},
+            },
+            {
+                "timestamp": "2026-02-05T12:39:05Z",
+                "level": "WARN",
+                "service": "edge-router",
+                "component": "RetryController",
+                "event": "CircuitBreakerOpen",
+                "message": "Retry saturation detected after timeout bursts",
+                "metadata": {"open_circuits": 4, "error_class": "DependencyTimeout"},
+            },
         ],
     }
 
@@ -60,6 +87,12 @@ async def test_generic_config_error_lifecycle(test_client):
     assert body["remediation_result"]["action_taken"] == "config_change"
     pre_transitions = (body.get("integration_trace") or {}).get("jira_transitions") or []
     assert [item.get("to_status") for item in pre_transitions[:3]] == ["To Do", "In Progress", "In Review"]
+    event_types = [event["event_type"] for event in body.get("timeline", [])]
+    assert "ticket_moved_in_progress" in event_types
+    assert "pr_created" in event_types
+    assert "ticket_moved_in_review" in event_types
+    assert event_types.index("ticket_moved_in_progress") < event_types.index("pr_created")
+    assert event_types.index("pr_created") < event_types.index("ticket_moved_in_review")
 
     approved = await test_client.post(f"/incidents/{incident_id}/approve-merge")
     assert approved.status_code == 200
@@ -141,4 +174,4 @@ async def test_flapping_backlog_fixture_drives_high_quality_rca(test_client):
 
     assert signature["root_cause_category"] == "config_error"
     assert signature["confidence_score"] >= 0.7
-    assert len(signature["evidence_chain"]) >= 2
+    assert len(signature["evidence_chain"]) >= 4

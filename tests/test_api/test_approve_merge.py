@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -138,3 +139,53 @@ async def test_approve_merge_uses_current_runtime_gate_settings_over_stale_polic
     detail = approve_response.json()
     assert detail["approval_status"] == "approved"
     assert detail["pr_status"] == "merged"
+
+
+@pytest.mark.asyncio
+async def test_approve_merge_emits_simulation_recovery_log(
+    monkeypatch: pytest.MonkeyPatch,
+    test_client,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _CaptureLogger:
+        def info(self, message: str, **kwargs: Any) -> None:
+            calls.append((message, kwargs))
+
+        def warning(self, message: str, **kwargs: Any) -> None:
+            calls.append((message, kwargs))
+
+    monkeypatch.setattr("resilix.api.incidents.logger", _CaptureLogger())
+    payload = _payload()
+    payload["simulation"] = {"source": "resilix-simulator", "scenario": "flapping", "seed": 42}
+    response = await test_client.post("/webhook/prometheus", json=payload)
+    incident_id = response.json()["incident_id"]
+
+    approve_response = await test_client.post(f"/incidents/{incident_id}/approve-merge")
+    assert approve_response.status_code == 200
+    messages = [message for message, _ in calls]
+    assert "Simulated recovery verified" in messages
+
+
+@pytest.mark.asyncio
+async def test_approve_merge_skips_simulation_recovery_log_for_non_simulation_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    test_client,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _CaptureLogger:
+        def info(self, message: str, **kwargs: Any) -> None:
+            calls.append((message, kwargs))
+
+        def warning(self, message: str, **kwargs: Any) -> None:
+            calls.append((message, kwargs))
+
+    monkeypatch.setattr("resilix.api.incidents.logger", _CaptureLogger())
+    response = await test_client.post("/webhook/prometheus", json=_payload())
+    incident_id = response.json()["incident_id"]
+
+    approve_response = await test_client.post(f"/incidents/{incident_id}/approve-merge")
+    assert approve_response.status_code == 200
+    messages = [message for message, _ in calls]
+    assert "Simulated recovery verified" not in messages

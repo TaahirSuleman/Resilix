@@ -30,6 +30,11 @@ def test_log_generator_is_seed_deterministic() -> None:
 
     assert first == second
     assert first != third
+    events = {entry["event"] for entry in first}
+    assert "TargetHealthFlapping" in events
+    assert "ResolverDialTimeout" in events
+    assert "DependencyTimeout" in events
+    assert "CircuitBreakerOpen" in events
 
 
 def test_payload_generator_is_seed_deterministic() -> None:
