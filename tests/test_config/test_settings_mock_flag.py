@@ -38,11 +38,11 @@ def test_normalizes_gemini_flash_model_alias(monkeypatch):
     assert settings.resolved_gemini_model_flash() == "gemini-3-flash-preview"
 
 
-def test_default_thinking_levels_are_low(monkeypatch):
+def test_default_thinking_levels_are_restored(monkeypatch):
     monkeypatch.delenv("SENTINEL_THINKING_LEVEL", raising=False)
     monkeypatch.delenv("SHERLOCK_THINKING_LEVEL", raising=False)
     monkeypatch.delenv("MECHANIC_THINKING_LEVEL", raising=False)
     settings = _fresh_settings()
-    assert settings.sentinel_thinking_level == "low"
-    assert settings.sherlock_thinking_level == "low"
-    assert settings.mechanic_thinking_level == "low"
+    assert settings.sentinel_thinking_level == "medium"
+    assert settings.sherlock_thinking_level == "high"
+    assert settings.mechanic_thinking_level == "high"
