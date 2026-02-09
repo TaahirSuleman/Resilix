@@ -222,3 +222,83 @@ def test_provider_readiness_reports_unready_api_config(monkeypatch: pytest.Monke
     assert readiness["github"]["resolved_backend"] == "unavailable"
     assert readiness["github"]["reason"] == "missing_or_invalid_config"
     assert "GITHUB_TOKEN" in readiness["github"]["missing_fields"]
+
+
+def test_github_direct_patches_coredns_config_content() -> None:
+    provider = GithubDirectProvider(token="token", owner="owner", default_base_branch="main")
+    source = """apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-config
+data:
+  Corefile: |
+    .:53 {
+        errors
+        forward . 10.0.0.1:53
+        cache 30
+    }
+  failover_mode: "DISABLED_MANUAL"
+"""
+    patched = provider._build_remediated_content(
+        target_file="infra/dns/coredns-config.yaml",
+        existing_content=source,
+        action=RecommendedAction.CONFIG_CHANGE,
+        summary="dns fix",
+        remediation_context={},
+    )
+    assert patched is not None
+    assert "forward . 1.1.1.1 8.8.8.8 9.9.9.9" in patched
+    assert 'failover_mode: "AUTO"' in patched
+
+
+def test_github_direct_patches_dependencies_yaml_content() -> None:
+    provider = GithubDirectProvider(token="token", owner="owner", default_base_branch="main")
+    source = """upstream:
+  timeout_ms: 9000
+  max_retries: 10
+  backoff_ms: 5000
+  circuit_breaker_enabled: false
+"""
+    patched = provider._build_remediated_content(
+        target_file="infra/dependencies.yaml",
+        existing_content=source,
+        action=RecommendedAction.CONFIG_CHANGE,
+        summary="dependency fix",
+        remediation_context={},
+    )
+    assert patched is not None
+    assert "timeout_ms: 1500" in patched
+    assert "max_retries: 3" in patched
+    assert "backoff_ms: 250" in patched
+    assert "circuit_breaker_enabled: true" in patched
+
+
+def test_github_direct_patches_handlers_py_content() -> None:
+    provider = GithubDirectProvider(token="token", owner="owner", default_base_branch="main")
+    source = """import requests
+
+def handler():
+    return requests.get("https://example.com")
+"""
+    patched = provider._build_remediated_content(
+        target_file="src/app/handlers.py",
+        existing_content=source,
+        action=RecommendedAction.FIX_CODE,
+        summary="handler fix",
+        remediation_context={},
+    )
+    assert patched is not None
+    assert "_resilix_safe_http_call(requests.get, " in patched
+    assert "def _resilix_safe_http_call" in patched
+
+
+def test_github_direct_unknown_target_falls_back() -> None:
+    provider = GithubDirectProvider(token="token", owner="owner", default_base_branch="main")
+    patched = provider._build_remediated_content(
+        target_file="README.md",
+        existing_content="# docs\n",
+        action=RecommendedAction.FIX_CODE,
+        summary="fallback",
+        remediation_context={},
+    )
+    assert patched is None

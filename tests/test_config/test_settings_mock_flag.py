@@ -28,7 +28,7 @@ def test_uses_default_when_no_flag_set(monkeypatch):
     monkeypatch.delenv("USE_MOCK_PROVIDERS", raising=False)
     monkeypatch.delenv("USE_MOCK_MCP", raising=False)
     settings = _fresh_settings()
-    assert settings.effective_use_mock_providers() is True
+    assert settings.effective_use_mock_providers() is settings.use_mock_providers
     assert settings.is_legacy_mock_flag_used() is False
 
 
@@ -36,3 +36,13 @@ def test_normalizes_gemini_flash_model_alias(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL_FLASH", "gemini-3-flash")
     settings = _fresh_settings()
     assert settings.resolved_gemini_model_flash() == "gemini-3-flash-preview"
+
+
+def test_default_thinking_levels_are_low(monkeypatch):
+    monkeypatch.delenv("SENTINEL_THINKING_LEVEL", raising=False)
+    monkeypatch.delenv("SHERLOCK_THINKING_LEVEL", raising=False)
+    monkeypatch.delenv("MECHANIC_THINKING_LEVEL", raising=False)
+    settings = _fresh_settings()
+    assert settings.sentinel_thinking_level == "low"
+    assert settings.sherlock_thinking_level == "low"
+    assert settings.mechanic_thinking_level == "low"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,73 @@ class _FakeDemoClient:
         raise RuntimeError(f"Unexpected URL: {url}")
 
 
+class _FakeDemoClientTriggerTimeout:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.detail_count = 0
+        self.trigger_attempts = 0
+
+    def __enter__(self) -> "_FakeDemoClientTriggerTimeout":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def get(self, url: str, **kwargs: Any) -> _FakeResponse:
+        if url.endswith("/health"):
+            return _FakeResponse(
+                200,
+                {
+                    "status": "ok",
+                    "adk_mode": "strict",
+                    "effective_use_mock_providers": False,
+                    "integration_backends": {"jira": "jira_api", "github": "github_api"},
+                },
+            )
+        if url.endswith("/incidents"):
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            return _FakeResponse(
+                200,
+                {
+                    "items": [
+                        {
+                            "incident_id": "INC-timeout-1",
+                            "service_name": "dns-resolver",
+                            "severity": "critical",
+                            "created_at": now,
+                        }
+                    ]
+                },
+            )
+        if "/incidents/" in url:
+            self.detail_count += 1
+            if self.detail_count == 1:
+                return _FakeResponse(
+                    200,
+                    {
+                        "incident_id": "INC-timeout-1",
+                        "status": "awaiting_approval",
+                        "timeline": [],
+                    },
+                )
+            return _FakeResponse(
+                200,
+                {
+                    "incident_id": "INC-timeout-1",
+                    "status": "resolved",
+                    "timeline": [],
+                },
+            )
+        raise RuntimeError(f"Unexpected URL: {url}")
+
+    def post(self, url: str, **kwargs: Any) -> _FakeResponse:
+        if url.endswith("/webhook/prometheus"):
+            self.trigger_attempts += 1
+            raise run_deployed_demo.httpx.ReadTimeout("trigger timeout")
+        if url.endswith("/incidents/INC-timeout-1/approve-merge"):
+            return _FakeResponse(200, {"incident_id": "INC-timeout-1", "status": "resolved"})
+        raise RuntimeError(f"Unexpected URL: {url}")
+
+
 def test_validate_health_preflight_rejects_mock() -> None:
     with pytest.raises(RuntimeError, match="Mock providers are enabled"):
         run_deployed_demo._validate_health_preflight(
@@ -116,3 +184,40 @@ def test_run_deployed_demo_writes_artifacts(
     assert (artifact_dir / "incident.json").exists()
     assert (artifact_dir / "external_checks.json").exists()
     assert (artifact_dir / "summary.md").exists()
+
+
+def test_run_deployed_demo_recovers_incident_id_after_trigger_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("httpx.Client", _FakeDemoClientTriggerTimeout)
+    monkeypatch.setattr(
+        "simulator.scripts.run_deployed_demo.verify_external_side_effects",
+        lambda **kwargs: {"ok": True, "incident_id": kwargs["incident_id"]},
+    )
+    monkeypatch.setenv("GITHUB_OWNER", "acme")
+
+    argv = [
+        "run_deployed_demo.py",
+        "--base-url",
+        "https://example.run.app",
+        "--scenario",
+        "flapping",
+        "--artifacts-dir",
+        str(tmp_path),
+        "--trigger-retries",
+        "1",
+    ]
+    monkeypatch.setattr("sys.argv", argv)
+
+    run_deployed_demo.main()
+
+    dirs = sorted(path for path in tmp_path.iterdir() if path.is_dir())
+    assert dirs, "Expected one artifacts directory"
+    artifact_dir = dirs[0]
+    accepted = json.loads((artifact_dir / "accepted.json").read_text(encoding="utf-8"))
+    assert accepted["incident_id"] == "INC-timeout-1"
+    assert accepted["recovered_via"] in {
+        "incident_list_lookup_after_trigger_timeout",
+        "final_incident_list_lookup_after_trigger_timeouts",
+    }
